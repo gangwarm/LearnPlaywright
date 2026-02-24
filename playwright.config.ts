@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { ConfigManager } from './utils/ConfigManager';
 
 /**
  * Read environment variables from file.
@@ -30,6 +31,8 @@ export default defineConfig({
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
+    // Dynamically gets the URL from our JSON manager
+    screenshot: 'only-on-failure',
   },
 
   /* Configure projects for major browsers */

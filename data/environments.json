@@ -1,0 +1,16 @@
+{
+  "QA": {
+    "baseUrl": "https://www.saucedemo.com",
+    "users": {
+      "standard": { "id": "standard_user", "envPassKey": "QA_STANDARD_PASS" },
+      "locked": { "id": "locked_out_user", "envPassKey": "QA_LOCKED_PASS" },
+      "problem": { "id": "problem_user", "envPassKey": "QA_PROBLEM_PASS" }
+    }
+  },
+  "PROD": {
+    "baseUrl": "https://www.saucedemo.com",
+    "users": {
+      "admin": { "id": "admin_user", "envPassKey": "PROD_ADMIN_PASS" }
+    }
+  }
+}

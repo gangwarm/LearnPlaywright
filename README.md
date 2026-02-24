@@ -9,13 +9,16 @@ A scalable, professional-grade E2E testing framework built with Playwright and T
 - **CI/CD:** Integrated with GitHub Actions for automated cloud test execution.
 
 ## 🏗 Framework Architecture
-This project follows the **Page Object Model (POM)** to ensure maintainability and scalability:
+This project follows the **Page Object Model (POM)** and **Data-Driven Testing (DDT)** patterns:
 
-- **`pages/`**: The "Source of Truth" for UI elements and page actions.
+- **`pages/`**: Contains Page Objects (e.g., `LoginPage.ts`) defining UI selectors and actions.
 - **`pages/components/`**: Reusable UI elements like Navbars and Footers.
 - **`fixtures/`**: Dependency injection layer to keep tests clean and boilerplate-free.
-- **`data/`**: Externalized test data (JSON) to separate data from logic.
-- **`utils/`**: Shared helper functions for global logic.
+- **`data/`**: 
+    - `testRegistry.json`: The "Command Center" for test execution (enabling/disabling tests, setting environments and many other things).
+    - `environments.json`: Maps environment keys (QA, PROD) to Base URLs and user roles. 
+- **`utils/`**: 
+    - `ConfigManager.ts`: Core logic for resolving URLs and fetching secrets from `.env` based on the Registry.
 - **`tests/`**: Organized into a 4-tier testing strategy:
     - `system/`: Isolated component testing.
     - `integration/`: Testing interactions between modules.
@@ -25,14 +28,12 @@ This project follows the **Page Object Model (POM)** to ensure maintainability a
 ## 🔒 Security & Environment
 - **`.env`**: Stores local environment variables (Base URL, Credentials).
 - **`.gitignore`**: Strictly configured to exclude sensitive data (`.env`) and heavy dependencies (`node_modules`).
+- **Registry** defines the `userRole` (e.g., "standard").
+- **Environments JSON** defines the `envPassKey` (e.g., "QA_STANDARD_PASS").
+- **ConfigManager** fetches the actual password from the local `.env` file using that key.
 
 ## 🚀 Getting Started
 1. Clone the repository.
 2. Run `npm install`.
 3. Create a `.env` file in the root directory.
 4. Run `npx playwright test` to execute the suite.
-
-
-
-
-

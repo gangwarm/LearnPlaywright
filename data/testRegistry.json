@@ -1,0 +1,20 @@
+[
+  {
+    "metadata": {
+      "tcId": "AppLogin",
+      "title": "login functionality",
+      "type": "system-testing",
+      "priority": "P0",
+      "tags": ["@smoke", "@critical","@regression"]
+    },
+    "execution": {
+      "enabled": true,
+      "environment": "QA",
+      "browser": "firefox"
+    },
+    "data": {
+      "userRole": "standard",
+      "itemName": "Sauce Labs Backpack"
+    }
+  }
+]
