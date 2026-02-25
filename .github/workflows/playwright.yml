@@ -19,6 +19,11 @@ jobs:
       run: npx playwright install --with-deps
     - name: Run Playwright tests
       run: npx playwright test
+      env:
+        # This connects your GitHub Secrets to your code
+        QA_STANDARD_PASS: ${{ secrets.QA_STANDARD_PASS }}
+        # If you have other secrets in your .env, add them here too:
+        # STANDARD_USER: ${{ secrets.STANDARD_USER }}
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:

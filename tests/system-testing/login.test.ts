@@ -11,16 +11,17 @@ test.describe('Authentication', () => {
     // Check if the test is enabled in the registry before running
     test.skip(!tcData?.execution.enabled, 'Test disabled in Registry');
 
-    test(`${tcData?.metadata.tcId}: ${tcData?.metadata.title}`, async ({ page, browserName  }) => {
+    //test(`${tcData?.metadata.tcId}: ${tcData?.metadata.title}`, async ({ page, browserName  }) => {
+    test(`${tcData?.metadata.tcId}: ${tcData?.metadata.title}`, async ({ page }) => {
 
                 // 1. BROWSER FILTER LOGIC
-        const targetBrowser = tcData?.execution.browser.toLowerCase();
+        //const targetBrowser = tcData?.execution.browser.toLowerCase();
         
         // If the registry doesn't say "all", and the current browser 
         // doesn't match the registry, skip this run.
-        if (targetBrowser !== 'all' && targetBrowser !== browserName) {
-            test.skip(true, `Skipping ${browserName} because Registry specifies ${targetBrowser}`);
-        }
+        //if (targetBrowser !== 'all' && targetBrowser !== browserName) {
+            //test.skip(true, `Skipping ${browserName} because Registry specifies ${targetBrowser}`);
+        //}
 
         const loginPage = new LoginPage(page);
 

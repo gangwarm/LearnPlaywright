@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { ConfigManager } from './utils/ConfigManager';
+import registry from './data/testRegistry.json';
 
 /**
  * Read environment variables from file.
@@ -12,6 +13,54 @@ import { ConfigManager } from './utils/ConfigManager';
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
+
+// 1. Logic to determine which browser project should be active
+// This finds the 'AppLogin' entry and checks the browser string
+const tcData = registry.find(t => t.metadata.tcId === 'AppLogin');
+const targetBrowser = tcData?.execution.browser.toLowerCase() || 'all';
+
+// 2. Define the available browser configurations
+const browserConfigs = [
+  {
+    name: 'chromium',
+    use: { ...devices['Desktop Chrome'] },
+  },
+  {
+    name: 'firefox',
+    use: { ...devices['Desktop Firefox'] },
+  },
+  {
+    name: 'webkit',
+    use: { ...devices['Desktop Safari'] },
+  },
+   /* Test against mobile viewports. */
+    // {
+    //   name: 'Mobile Chrome',
+    //   use: { ...devices['Pixel 5'] },
+    // },
+    // {
+    //   name: 'Mobile Safari',
+    //   use: { ...devices['iPhone 12'] },
+    // },
+
+    /* Test against branded browsers. */
+    // {
+    //   name: 'Microsoft Edge',
+    //   use: { ...devices['Desktop Edge'], channel: 'msedge' },
+    // },
+    // {
+    //   name: 'Google Chrome',
+    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+    // },
+];
+
+// 3. Filter the projects list based on the JSON registry
+// If JSON says 'all', use everything. Otherwise, filter for the specific name.
+const activeProjects = targetBrowser === 'all' 
+  ? browserConfigs 
+  : browserConfigs.filter(p => p.name === targetBrowser);
+
+
 export default defineConfig({
   testDir: './tests',
   /* Run tests in files in parallel */
@@ -35,43 +84,8 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
 
-  /* Configure projects for major browsers */
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
-
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
-
-    /* Test against mobile viewports. */
-    // {
-    //   name: 'Mobile Chrome',
-    //   use: { ...devices['Pixel 5'] },
-    // },
-    // {
-    //   name: 'Mobile Safari',
-    //   use: { ...devices['iPhone 12'] },
-    // },
-
-    /* Test against branded browsers. */
-    // {
-    //   name: 'Microsoft Edge',
-    //   use: { ...devices['Desktop Edge'], channel: 'msedge' },
-    // },
-    // {
-    //   name: 'Google Chrome',
-    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    // },
-  ],
+  /* FIX: We now use the filtered 'activeProjects' array */
+  projects: activeProjects,
 
   /* Run your local dev server before starting the tests */
   // webServer: {

@@ -25,6 +25,12 @@ This project follows the **Page Object Model (POM)** and **Data-Driven Testing (
     - `e2e/`: Full end-to-end user journeys.
     - `regression/`: Stability checks for existing features.
 
+## ⚙️ Dynamic Execution Control
+The framework features **Pre-Execution Project Filtering**. Unlike standard setups that skip tests during runtime, this framework dynamically configures its own `projects` array in `playwright.config.ts` based on the Registry.
+
+- **Clean Reporting:** If the Registry specifies `chromium`, Playwright only initializes a Chromium worker. Results show `1 passed` instead of `2 skipped, 1 passed`.
+- **Infrastructure Abstraction:** Test files remain clean and focused on business logic, as browser and environment filtering is handled at the config level.
+
 ## 🔒 Security & Environment
 - **`.env`**: Stores local environment variables (Base URL, Credentials).
 - **`.gitignore`**: Strictly configured to exclude sensitive data (`.env`) and heavy dependencies (`node_modules`).
