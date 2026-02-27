@@ -3,9 +3,75 @@
     "metadata": {
       "tcId": "AppLogin",
       "title": "login functionality",
-      "type": "system-testing",
       "priority": "P0",
-      "tags": ["@smoke", "@critical","@regression"]
+      "testType": "system-testing",
+      "tags": [
+        "@smoke",
+        "@critical",
+        "@regression"
+      ]
+    },
+    "execution": {
+      "enabled": true,
+      "environment": "QA",
+      "browser": "all"
+    },
+    "data": {
+      "Login": {
+        "TestCaseID": "AppLogin",
+        "UserRole": "standard"
+      }
+    }
+  },
+  {
+    "metadata": {
+      "tcId": "CartCheck-TC01",
+      "title": "verify journey from login to cart to logout",
+      "priority": "P1",
+      "testType": "system-testing",
+      "tags": [
+        "@smoke",
+        "@critical",
+        "@regression"
+      ]
+    },
+    "execution": {
+      "enabled": true,
+      "environment": "QA",
+      "browser": "all"
+    },
+    "data": {
+      "Login": {
+        "TestCaseID": "CartCheck-TC01",
+        "UserRole": "standard"
+      },
+      "ProductPage": {
+        "TestCaseID": "CartCheck-TC01",
+        "AddProduct1": "Sauce Labs Bolt T-Shirt",
+        "AddProduct2": "Sauce Labs Fleece Jacket",
+        "AddProduct3": "Sauce Labs Onesie",
+        "ItemsInCart": 3
+      },
+      "Cart": {
+        "TestCaseID": "CartCheck-TC01",
+        "VerifyProduct1": "Sauce Labs Bolt T-Shirt",
+        "VerifyProduct2": "Sauce Labs Fleece Jacket",
+        "VerifyProduct3": "Sauce Labs Onesie",
+        "VerifyItemsInCart": 3
+      }
+    }
+  },
+  {
+    "metadata": {
+      "tcId": "CartCheck-TC02",
+      "title": "verify journey from login to cart to logout",
+      "priority": "P1",
+      "testType": "system-testing",
+      "tags": [
+        "@smoke",
+        "@critical",
+        "@regression"
+      ]
     },
     "execution": {
       "enabled": true,
@@ -13,8 +79,56 @@
       "browser": "firefox"
     },
     "data": {
-      "userRole": "standard",
-      "itemName": "Sauce Labs Backpack"
+      "Login": {
+        "TestCaseID": "CartCheck-TC02",
+        "UserRole": "standard"
+      },
+      "ProductPage": {
+        "TestCaseID": "CartCheck-TC02",
+        "AddProduct1": "Sauce Labs Backpack",
+        "AddProduct2": "Sauce Labs Bike Light",
+        "ItemsInCart": 2
+      },
+      "Cart": {
+        "TestCaseID": "CartCheck-TC02",
+        "VerifyProduct1": "Sauce Labs Backpack",
+        "VerifyProduct2": "Sauce Labs Bike Light"
+      }
+    }
+  },
+  {
+    "metadata": {
+      "tcId": "CartCheck-TC02",
+      "title": "verify journey from login to cart to logout",
+      "priority": "P1",
+      "testType": "system-testing",
+      "tags": [
+        "@smoke",
+        "@critical",
+        "@regression"
+      ]
+    },
+    "execution": {
+      "enabled": true,
+      "environment": "QA",
+      "browser": "webkit"
+    },
+    "data": {
+      "Login": {
+        "TestCaseID": "CartCheck-TC02",
+        "UserRole": "standard"
+      },
+      "ProductPage": {
+        "TestCaseID": "CartCheck-TC02",
+        "AddProduct1": "Sauce Labs Backpack",
+        "AddProduct2": "Sauce Labs Bike Light",
+        "ItemsInCart": 2
+      },
+      "Cart": {
+        "TestCaseID": "CartCheck-TC02",
+        "VerifyProduct1": "Sauce Labs Backpack",
+        "VerifyProduct2": "Sauce Labs Bike Light"
+      }
     }
   }
 ]

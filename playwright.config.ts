@@ -1,25 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 import { ConfigManager } from './utils/ConfigManager';
-import registry from './data/testRegistry.json';
+import * as fs from 'fs';
+import * as path from 'path';
 
-/**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
- */
-// import dotenv from 'dotenv';
-// import path from 'path';
-// dotenv.config({ path: path.resolve(__dirname, '.env') });
-
-/**
- * See https://playwright.dev/docs/test-configuration.
- */
-
-// 1. Logic to determine which browser project should be active
-// This finds the 'AppLogin' entry and checks the browser string
-const tcData = registry.find(t => t.metadata.tcId === 'AppLogin');
-const targetBrowser = tcData?.execution.browser.toLowerCase() || 'all';
-
-// 2. Define the available browser configurations
+// 1. Define the available browser configurations
 const browserConfigs = [
   {
     name: 'chromium',
@@ -54,12 +38,24 @@ const browserConfigs = [
     // },
 ];
 
-// 3. Filter the projects list based on the JSON registry
-// If JSON says 'all', use everything. Otherwise, filter for the specific name.
-const activeProjects = targetBrowser === 'all' 
-  ? browserConfigs 
-  : browserConfigs.filter(p => p.name === targetBrowser);
+// 2. FUNCTION to read the JSON from disk (Dynamic Project Selection)
+function getActiveProjects() {
+  const jsonPath = path.join(__dirname, 'data/testRegistry.json');
+  
+  if (!fs.existsSync(jsonPath)) {
+    console.warn('⚠️ testRegistry.json not found, defaulting to all browsers');
+    return browserConfigs;
+  }
 
+  const registry = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+  
+  const requestedBrowsers = registry.map((t: any) => t.execution.browser.toLowerCase());
+  const needsAll = requestedBrowsers.includes('all');
+
+  return needsAll 
+    ? browserConfigs 
+    : browserConfigs.filter(p => requestedBrowsers.includes(p.name));
+}
 
 export default defineConfig({
   testDir: './tests',
@@ -73,6 +69,10 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
+
+// 3. Register the Global Setup
+  globalSetup: require.resolve('./utils/globalSetup'),
+
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('')`. */
@@ -84,8 +84,8 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
 
-  /* FIX: We now use the filtered 'activeProjects' array */
-  projects: activeProjects,
+// 4. CALL THE FUNCTION to get projects dynamically
+  projects: getActiveProjects(),
 
   /* Run your local dev server before starting the tests */
   // webServer: {
@@ -93,4 +93,5 @@ export default defineConfig({
   //   url: 'http://localhost:3000',
   //   reuseExistingServer: !process.env.CI,
   // },
+
 });

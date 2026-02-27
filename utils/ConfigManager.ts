@@ -22,28 +22,38 @@ export class ConfigManager {
         return target.toUpperCase();
     }
 
-    static getBaseUrl(envName?: string): string {
+static getBaseUrl(envName?: string): string {
         const targetEnv = this.getTargetEnv(envName);
-        if (!envData[targetEnv]) {
-            throw new Error(`❌ Environment ${targetEnv} not found in environments.json`);
+        
+        // Use type assertion (any) so TS allows the dynamic string lookup
+        const envConfig = (envData as any)[targetEnv];
+        
+        if (!envConfig) {
+            throw new Error(`❌ Environment "${targetEnv}" not found in environments.json. Available: ${Object.keys(envData).join(', ')}`);
         }
-        return envData[targetEnv].baseUrl;
+        return envConfig.baseUrl;
     }
 
-    static getUser(role: string, envName?: string) {
+static getUser(role: string, envName?: string) {
         const targetEnv = this.getTargetEnv(envName);
-        const userConfig = envData[targetEnv].users[role];
+        const envConfig = (envData as any)[targetEnv];
+
+        if (!envConfig) {
+            throw new Error(`❌ Environment "${targetEnv}" not found.`);
+        }
+
+        const userConfig = envConfig.users[role];
         
         if (!userConfig) {
-            throw new Error(`❌ Role "${role}" not found in ${targetEnv} environment.`);
+            // This is where your earlier error came from because 'role' was undefined from Excel
+            throw new Error(`❌ Role "${role}" not found in ${targetEnv} configuration.`);
         }
 
         const username = userConfig.id;
-        // Look up the password in the .env file using the key from JSON
         const password = process.env[userConfig.envPassKey];
 
         if (!password) {
-            throw new Error(`❌ Secret "${userConfig.envPassKey}" not found in .env file.`);
+            throw new Error(`❌ Password key "${userConfig.envPassKey}" found in JSON, but value is missing in .env file.`);
         }
 
         return { username, password };

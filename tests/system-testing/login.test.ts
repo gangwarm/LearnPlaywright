@@ -11,6 +11,15 @@ test.describe('Authentication', () => {
     // Check if the test is enabled in the registry before running
     test.skip(!tcData?.execution.enabled, 'Test disabled in Registry');
 
+    // 2. BROWSER FILTER LOGIC
+    // This ensures that since Registry says 'firefox', this test skips 'chromium' and 'webkit'
+    test.beforeEach(async ({ browserName }) => {
+        const targetBrowser = tcData?.execution.browser.toLowerCase();
+        if (targetBrowser !== 'all' && targetBrowser !== browserName) {
+            test.skip(true, `Registry restricted to ${targetBrowser}. Skipping ${browserName}`);
+        }
+    });
+
     //test(`${tcData?.metadata.tcId}: ${tcData?.metadata.title}`, async ({ page, browserName  }) => {
     test(`${tcData?.metadata.tcId}: ${tcData?.metadata.title}`, async ({ page }) => {
 
@@ -31,7 +40,9 @@ test.describe('Authentication', () => {
         
         // 2. Fetch Credentials
         // Maps 'standard' role to the secret in .env via ConfigManager
-        const user = ConfigManager.getUser(tcData!.data.userRole, tcData?.execution.environment);
+        console.log('Test Data:', tcData?.data);
+        //const user = ConfigManager.getUser(tcData!.data.UserRole, tcData?.execution.environment);
+        const user = ConfigManager.getUser(tcData.data.Login.UserRole, tcData.execution.environment);
 
         // 3. Execution
         await loginPage.navigate(url); // Passing URL directly since config baseURL is off
