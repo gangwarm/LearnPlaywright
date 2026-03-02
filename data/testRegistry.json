@@ -31,14 +31,13 @@
       "testType": "system-testing",
       "tags": [
         "@smoke",
-        "@critical",
-        "@regression"
+        "@critical"
       ]
     },
     "execution": {
       "enabled": true,
       "environment": "QA",
-      "browser": "all"
+      "browser": "firefox"
     },
     "data": {
       "Login": {

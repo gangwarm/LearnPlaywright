@@ -13,11 +13,26 @@ test.describe('Authentication', () => {
 
     // 2. BROWSER FILTER LOGIC
     // This ensures that since Registry says 'firefox', this test skips 'chromium' and 'webkit'
-    test.beforeEach(async ({ browserName }) => {
+    test.beforeEach(async ({ browserName},testInfo) => {
         const targetBrowser = tcData?.execution.browser.toLowerCase();
         if (targetBrowser !== 'all' && targetBrowser !== browserName) {
             test.skip(true, `Registry restricted to ${targetBrowser}. Skipping ${browserName}`);
         }
+
+        // 2. Feed all Registry metadata to the Reporter
+        if (tcData) {
+        testInfo.annotations.push({ type: 'TcId', description: tcData.metadata.tcId });
+        testInfo.annotations.push({ type: 'Title', description: tcData.metadata.title });
+        testInfo.annotations.push({ type: 'Priority', description: tcData.metadata.priority });
+        testInfo.annotations.push({ type: 'TestType', description: tcData.metadata.testType });
+        testInfo.annotations.push({ type: 'Environment', description: tcData.execution.environment });
+        testInfo.annotations.push({ type: 'UserRole', description: tcData.data.Login.UserRole });
+        
+        // Handle tags array (join with commas)
+        if (tcData.metadata.tags) {
+            testInfo.annotations.push({ type: 'Tags', description: tcData.metadata.tags.join(', ') });
+        }
+    }
     });
 
     //test(`${tcData?.metadata.tcId}: ${tcData?.metadata.title}`, async ({ page, browserName  }) => {

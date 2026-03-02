@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>LearnPlaywright - Test Execution Summary</title>
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 30px; background: #f0f2f5; color: #1c1e21; }
+                .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+                h2 { color: #2c3e50; margin: 0; }
+                .summary-container { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-bottom: 30px; }
+                .summary-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center; border-top: 4px solid #2c3e50; }
+                .summary-card h3 { margin: 0; font-size: 11px; color: #6a737d; text-transform: uppercase; }
+                .summary-card p { margin: 10px 0 0; font-size: 24px; font-weight: bold; }
+                .pass { color: #28a745; } .fail { color: #d73a49; } .skip { color: #6a737d; } .flaky { color: #f2994a; }
+                
+                .search-box { width: 100%; padding: 10px; margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+                
+                table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; table-layout: fixed; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+                th { background: #24292e; color: white; padding: 15px; font-size: 11px; text-transform: uppercase; text-align: left; }
+                .center { text-align: center; }
+                td { padding: 12px; border-bottom: 1px solid #e1e4e8; font-size: 13px; vertical-align: middle; word-wrap: break-word; }
+                .badge { padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; text-transform: uppercase; }
+                .priority-badge { background: #ffdce0; color: #af2c2c; }
+                .type-badge { background: #dbedff; color: #0366d6; }
+                .flaky-label { background: #fff5b1; color: #856404; font-size: 9px; padding: 2px 5px; border-radius: 3px; margin-left: 5px; vertical-align: middle; }
+                .browser-col { width: 80px; text-align: center; }
+                .icon { font-size: 18px; text-align: center; }
+                .error { color: #d73a49; font-size: 11px; font-family: monospace; }
+                .tags { color: #6a737d; font-style: italic; }
+                .trace-link { color: #0366d6; text-decoration: none; font-weight: bold; font-size: 12px; }
+                .legend { margin-top: 20px; font-size: 12px; color: #586069; background: white; padding: 10px; border-radius: 8px; }
+            </style>
+        </head>
+        <body>
+            <div class="header-flex">
+                <h2>LearnPlaywright - Test Execution Summary</h2>
+                <div style="text-align: right; font-size: 13px; color: #586069;">
+                    <b>Date:</b> 02/03/2026 | <b>Start:</b> 17:05:09 | <b>Duration:</b> 4.79s
+                </div>
+            </div>
+
+            <div class="summary-container">
+                <div class="summary-card"><h3>Total Executed</h3><p>2</p></div>
+                <div class="summary-card"><h3>Passed</h3><p class="pass">2</p></div>
+                <div class="summary-card"><h3>Failed</h3><p class="fail">0</p></div>
+                <div class="summary-card"><h3>Skipped</h3><p class="skip">0</p></div>
+                <div class="summary-card"><h3>Flaky</h3><p class="flaky">0</p></div>
+            </div>
+
+            <input type="text" id="searchInput" class="search-box" placeholder="Search by Test Type, Priority or Tags..." onkeyup="filterTable()">
+
+            <table id="resultsTable">
+                <thead>
+                    <tr>
+                        <th style="width: 25%">Test Case ID: Test Case Title</th>
+                        <th style="width: 8%">Type</th>
+                        <th style="width: 7%">Priority</th>
+                        <th class="center" style="width: 5%">Env</th>
+                        <th class="center" style="width: 7%">Role</th>
+                        <th class="center browser-col">Chrome</th>
+                        <th class="center browser-col">Firefox</th>
+                        <th class="center browser-col">Webkit</th>
+                        <th style="width: 15%">Error (First Failure)</th>
+                        <th style="width: 8%">Trace</th>
+                    </tr>
+                </thead>
+                <tbody>
+            <tr class="test-row" data-search="N/A Login, add item to cart, and logout N/A N/A N/A">
+                <td>
+                    <b>N/A</b>: Login, add item to cart, and logout
+                    
+                    <br><small class="tags">N/A</small>
+                </td>
+                <td><span class="badge type-badge">N/A</span></td>
+                <td><span class="badge priority-badge">N/A</span></td>
+                <td class="center">N/A</td>
+                <td class="center">N/A</td>
+                <td class="icon browser-col"><span style="color: #6a737d;">⏭️</span></td>
+                <td class="icon browser-col"><span style="color: #28a745;">✔️</span></td>
+                <td class="icon browser-col"><span style="color: #6a737d;">⏭️</span></td>
+                <td class="error"></td>
+                <td class="center">-</td>
+            </tr>
+        
+            <tr class="test-row" data-search="AppLogin AppLogin: login functionality @smoke, @critical, @regression system-testing P0">
+                <td>
+                    <b>AppLogin</b>: AppLogin: login functionality
+                    
+                    <br><small class="tags">@smoke, @critical, @regression</small>
+                </td>
+                <td><span class="badge type-badge">system-testing</span></td>
+                <td><span class="badge priority-badge">P0</span></td>
+                <td class="center">QA</td>
+                <td class="center">standard</td>
+                <td class="icon browser-col"><span style="color: #28a745;">✔️</span></td>
+                <td class="icon browser-col"><span style="color: #28a745;">✔️</span></td>
+                <td class="icon browser-col"><span style="color: #28a745;">✔️</span></td>
+                <td class="error"></td>
+                <td class="center">-</td>
+            </tr>
+        </tbody>
+            </table>
+            
+            <div class="legend">
+                <strong>Legend:</strong> 
+                <span style="color: #28a745;">✔️ Passed</span> | 
+                <span style="color: #d73a49;">❌ Failed</span> | 
+                <span style="color: #6a737d;">⏭️ Skipped</span> | 
+                - Not Scheduled
+            </div>
+
+            <script>
+                function filterTable() {
+                    var input, filter, table, tr, td, i, txtValue;
+                    input = document.getElementById("searchInput");
+                    filter = input.value.toUpperCase();
+                    table = document.getElementById("resultsTable");
+                    tr = table.getElementsByClassName("test-row");
+
+                    for (i = 0; i < tr.length; i++) {
+                        // Search within data-search attribute for better performance
+                        txtValue = tr[i].getAttribute('data-search');
+                        if (txtValue.toUpperCase().indexOf(filter) > -1) {
+                            tr[i].style.display = "";
+                        } else {
+                            tr[i].style.display = "none";
+                        }
+                    }
+                }
+            </script>
+        </body>
+        </html>

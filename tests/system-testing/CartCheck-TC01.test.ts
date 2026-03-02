@@ -4,6 +4,7 @@ import { ProductPage } from '../../pages/ProductPage';
 import { NavigationPage } from '../../pages/components/NavigationPage';
 import { ConfigManager } from '../../utils/ConfigManager';
 import registry from '../../data/testRegistry.json';
+//import { test, expect } from '../../base/baseTest';
 
 // Find the data for this specific test case
 const tcData = registry.find(t => t.metadata.tcId === 'CartCheck-TC01');
@@ -15,12 +16,27 @@ test.describe('Add products to cart', () => {
 
     // 2. BROWSER FILTER LOGIC
     // This ensures that if the registry says 'all', it runs on everything.
-    // If you change 'all' to 'webkit' in the JSON, it will skip Chrome/Firefox.
-    test.beforeEach(async ({ browserName }) => {
+    // If you change 'all' to 'webkit' in the JSON, it will skip Chrome/Firefox.                                                                                                                                                                            
+    test.beforeEach(async ({ browserName},testInfo) => {    
         const targetBrowser = tcData?.execution.browser.toLowerCase();
         if (targetBrowser !== 'all' && targetBrowser !== browserName) {
             test.skip(true, `Registry restricted to ${targetBrowser}. Skipping ${browserName}`);
         }
+
+        // 2. Feed all Registry metadata to the Reporter
+        if (tcData) {
+        testInfo.annotations.push({ type: 'TcId', description: tcData.metadata.tcId });
+        testInfo.annotations.push({ type: 'Title', description: tcData.metadata.title });
+        testInfo.annotations.push({ type: 'Priority', description: tcData.metadata.priority });
+        testInfo.annotations.push({ type: 'TestType', description: tcData.metadata.testType });
+        testInfo.annotations.push({ type: 'Environment', description: tcData.execution.environment });
+        testInfo.annotations.push({ type: 'UserRole', description: tcData.data.Login.UserRole });
+        
+        // Handle tags array (join with commas)
+        if (tcData.metadata.tags) {
+            testInfo.annotations.push({ type: 'Tags', description: tcData.metadata.tags.join(', ') });
+        }
+    }
     });
 
     test('Login, add item to cart, and logout', async ({ page }) => {

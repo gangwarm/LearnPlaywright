@@ -59,6 +59,10 @@ function getActiveProjects() {
 
 export default defineConfig({
   testDir: './tests',
+  // Store your project name here
+  metadata: {
+    projectName: 'LearnPlaywright' 
+  },
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -68,7 +72,13 @@ export default defineConfig({
   /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: 'html',
+
+  /* UPDATED: Added Custom Reporter alongside HTML */
+  reporter: [
+  ['list'],                        // 1. Live updates in your terminal
+  ['./utils/CustomReporter.ts'],   // 2. Your registry-specific logic
+  ['html', { open: 'never' }]      // 3. The standard Playwright HTML report
+],
 
 // 3. Register the Global Setup
   globalSetup: require.resolve('./utils/globalSetup'),
