@@ -1,5 +1,5 @@
 /**
- * CartCheck-TC01.test.ts
+ * CartCheck-TC02.test.ts
  *
  * CHANGES FROM ORIGINAL:
  *
@@ -26,7 +26,7 @@ import { ConfigManager }   from '../../utils/ConfigManager';
 
 test.describe('Shopping Cart Flow', () => {
 
-    test('CartCheck-TC01: Login and add multiple items to cart', async ({ page, tcData }) => {
+    test('CartCheck-TC02: Login and add multiple items to cart', async ({ page, tcData }) => {
         const loginPage  = new LoginPage(page);
         const productPage = new ProductPage(page);
         const menuNav    = new NavigationPage(page);
@@ -49,10 +49,9 @@ test.describe('Shopping Cart Flow', () => {
 
         // ── 2. Add Products ───────────────────────────────────────────────────
         // Only add products that are defined in the registry row — supports
-        // tests with 1, 2, or 3 products without needing separate test cases.
+        // tests with 1 or 2 products without needing separate test cases.
         if (products.AddProduct1) await productPage.addItemToCart(products.AddProduct1);
         if (products.AddProduct2) await productPage.addItemToCart(products.AddProduct2);
-        if (products.AddProduct3) await productPage.addItemToCart(products.AddProduct3);
 
         // ── 3. Verify Cart Count ──────────────────────────────────────────────
         // FIX: removed the duplicate textContent() assertion. toHaveText() is

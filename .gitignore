@@ -1,9 +1,23 @@
-
-# Playwright
-node_modules/
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
-/playwright/.auth/
+# ─── Secrets — NEVER commit these ───────────────────────────────────────────
 .env
+.env.*
+!.env.example      # Allow a template with no real values
+
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+
+# ─── Playwright output ────────────────────────────────────────────────────────
+test-results/
+playwright-report/
+playwright/.cache/
+
+# ─── Generated files (re-created by globalSetup on every run) ────────────────
+# testRegistry.json is generated from testRegistry.xlsx — no need to commit it.
+# If your CI pipeline does not run globalSetup first, remove this line.
+data/testRegistry.json
+
+# ─── OS / Editor ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+*.log
