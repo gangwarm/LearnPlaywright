@@ -1,0 +1,8 @@
+{
+  "QA": {
+    "apiBaseUrl": "https://dummyjson.com"
+  },
+  "PROD": {
+    "apiBaseUrl": "https://dummyjson.com"
+  }
+}

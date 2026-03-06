@@ -1,0 +1,10 @@
+# ── users/negative-login.assert.txt ───────────────────────────────────────────
+# DummyJSON POST /auth/login with invalid credentials
+# Validates the API returns a proper error response
+
+import base/api-common.assert.txt
+
+status == 400
+
+body.message exists
+body.message type string

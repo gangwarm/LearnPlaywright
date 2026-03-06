@@ -1,0 +1,28 @@
+# ── users/login.assert.txt ─────────────────────────────────────────────────────
+# DummyJSON POST /auth/login
+# https://dummyjson.com/docs/auth
+
+import base/api-common.assert.txt
+
+# Status
+status == 200
+
+# User identity fields
+body.id exists
+body.username exists
+body.email exists
+body.firstName exists
+body.lastName exists
+body.gender exists
+body.image exists
+
+# Tokens must be present (used by subsequent steps via ResponseStore)
+body.accessToken exists
+body.refreshToken exists
+
+# Type validation
+body.id type number
+body.username type string
+body.email type string
+body.accessToken type string
+body.refreshToken type string

@@ -1,0 +1,11 @@
+# ── posts/update-post.assert.txt ───────────────────────────────────────────────
+# DummyJSON PUT /posts/{id}
+
+import base/api-common.assert.txt
+
+status == 200
+
+body.id exists
+body.id type number
+body.title exists
+body.title type string

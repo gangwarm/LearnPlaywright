@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────
+# get-users.assert.txt
+# Assertions for GET /users
+# ─────────────────────────────────────────────────────────────
+
+# Status & performance
+status == 200
+responseTime < 2000ms
+
+# ── Response structure ────────────────────────────────────────
+# Top-level fields must exist and be correct type
+body.users type array
+body.total type integer
+body.skip  type integer
+body.limit type integer
+
+# Array must not be empty
+body.users.length > 0
+
+# ── Every user must have correct types ────────────────────────
+body.users[*].id        type integer
+body.users[*].firstName type string
+body.users[*].lastName  type string
+body.users[*].email     type email
+body.users[*].age       type integer
+
+# ── Values ────────────────────────────────────────────────────
+body.total > 0
+body.users[*].id exists
+body.users[*].firstName exists
+body.users[*].email exists

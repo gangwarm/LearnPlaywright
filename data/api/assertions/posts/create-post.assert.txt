@@ -1,0 +1,17 @@
+# ── posts/create-post.assert.txt ───────────────────────────────────────────────
+# DummyJSON POST /posts/add
+
+import base/api-common.assert.txt
+
+status == 201
+
+body.id exists
+body.id type number
+body.title exists
+body.title type string
+body.body exists
+body.userId exists
+body.userId type number
+body.tags exists
+body.tags type array
+body.tags.length > 0

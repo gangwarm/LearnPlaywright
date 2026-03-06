@@ -1,0 +1,347 @@
+{
+  "flows": [
+    {
+      "flowId": "USERS-01",
+      "setup": [],
+      "test": [
+        {
+          "registry": {
+            "FlowID": "USERS-01",
+            "TestCaseID": "USERS-01-S1",
+            "StepOrder": 1,
+            "Phase": "test",
+            "Description": "Get all users (public)",
+            "Protocol": "REST",
+            "Method": "GET",
+            "Endpoint": "/users",
+            "AuthType": "None",
+            "AssertionFile": "users/get-users.assert.txt",
+            "MaxResponseTime": 2000,
+            "RetryCount": 0,
+            "RetryDelay": 1000,
+            "Priority": "P2",
+            "Tags": "@smoke @regression",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {}
+        }
+      ],
+      "teardown": []
+    },
+    {
+      "flowId": "AUTH-01",
+      "setup": [
+        {
+          "registry": {
+            "FlowID": "AUTH-01",
+            "TestCaseID": "AUTH-01-S1",
+            "StepOrder": 1,
+            "Phase": "setup",
+            "Description": "Login with valid credentials",
+            "Protocol": "REST",
+            "Method": "POST",
+            "Endpoint": "/auth/login",
+            "AuthType": "None",
+            "ContentType": "application/json",
+            "TemplatePath": "templates/auth/login.json",
+            "AssertionFile": "users/login.assert.txt",
+            "ExtractAs": "authToken",
+            "MaxResponseTime": 2000,
+            "RetryCount": 1,
+            "RetryDelay": 500,
+            "MaskFields": "password",
+            "Priority": "P0",
+            "Tags": "@smoke @auth",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {
+            "username": "emilys",
+            "password": "emilyspass",
+            "expiresInMins": 30,
+            "title": "",
+            "body": "",
+            "tag1": "",
+            "tag2": "",
+            "userId": ""
+          }
+        }
+      ],
+      "test": [
+        {
+          "registry": {
+            "FlowID": "AUTH-01",
+            "TestCaseID": "AUTH-01-S2",
+            "StepOrder": 2,
+            "Phase": "test",
+            "Description": "Get authenticated user profile",
+            "Protocol": "REST",
+            "Method": "GET",
+            "Endpoint": "/auth/me",
+            "AuthType": "Bearer",
+            "AssertionFile": "users/get-user-profile.assert.txt",
+            "DependsOn": "AUTH-01-S1",
+            "MaxResponseTime": 2000,
+            "RetryCount": 0,
+            "RetryDelay": 1000,
+            "Priority": "P0",
+            "Tags": "@smoke @auth",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {}
+        }
+      ],
+      "teardown": []
+    },
+    {
+      "flowId": "AUTH-02",
+      "setup": [],
+      "test": [
+        {
+          "registry": {
+            "FlowID": "AUTH-02",
+            "TestCaseID": "AUTH-02-S1",
+            "StepOrder": 1,
+            "Phase": "test",
+            "Description": "Login with invalid credentials returns 400",
+            "Protocol": "REST",
+            "Method": "POST",
+            "Endpoint": "/auth/login",
+            "AuthType": "None",
+            "ContentType": "application/json",
+            "TemplatePath": "templates/auth/login.json",
+            "AssertionFile": "users/negative-login.assert.txt",
+            "MaxResponseTime": 2000,
+            "RetryCount": 0,
+            "RetryDelay": 1000,
+            "Priority": "P1",
+            "Tags": "@regression @negative",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {
+            "username": "baduser",
+            "password": "wrongpass",
+            "expiresInMins": 30,
+            "title": "",
+            "body": "",
+            "tag1": "",
+            "tag2": "",
+            "userId": ""
+          }
+        }
+      ],
+      "teardown": []
+    },
+    {
+      "flowId": "POSTS-01",
+      "setup": [],
+      "test": [
+        {
+          "registry": {
+            "FlowID": "POSTS-01",
+            "TestCaseID": "POSTS-01-S1",
+            "StepOrder": 1,
+            "Phase": "test",
+            "Description": "Get all posts",
+            "Protocol": "REST",
+            "Method": "GET",
+            "Endpoint": "/posts",
+            "AuthType": "None",
+            "AssertionFile": "posts/get-posts.assert.txt",
+            "MaxResponseTime": 2000,
+            "RetryCount": 0,
+            "RetryDelay": 1000,
+            "Priority": "P2",
+            "Tags": "@regression",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {}
+        },
+        {
+          "registry": {
+            "FlowID": "POSTS-01",
+            "TestCaseID": "POSTS-01-S2",
+            "StepOrder": 2,
+            "Phase": "test",
+            "Description": "Get posts with pagination",
+            "Protocol": "REST",
+            "Method": "GET",
+            "Endpoint": "/posts?limit=5&skip=0",
+            "AuthType": "None",
+            "AssertionFile": "posts/get-posts.assert.txt",
+            "MaxResponseTime": 2000,
+            "RetryCount": 0,
+            "RetryDelay": 1000,
+            "Priority": "P2",
+            "Tags": "@regression",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {}
+        },
+        {
+          "registry": {
+            "FlowID": "POSTS-01",
+            "TestCaseID": "POSTS-01-S3",
+            "StepOrder": 3,
+            "Phase": "test",
+            "Description": "Get single post by ID",
+            "Protocol": "REST",
+            "Method": "GET",
+            "Endpoint": "/posts/1",
+            "AuthType": "None",
+            "AssertionFile": "posts/get-single-post.assert.txt",
+            "MaxResponseTime": 2000,
+            "RetryCount": 0,
+            "RetryDelay": 1000,
+            "Priority": "P2",
+            "Tags": "@regression",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {}
+        }
+      ],
+      "teardown": []
+    },
+    {
+      "flowId": "POSTS-02",
+      "setup": [
+        {
+          "registry": {
+            "FlowID": "POSTS-02",
+            "TestCaseID": "POSTS-02-S1",
+            "StepOrder": 1,
+            "Phase": "setup",
+            "Description": "Login for posts CRUD flow",
+            "Protocol": "REST",
+            "Method": "POST",
+            "Endpoint": "/auth/login",
+            "AuthType": "None",
+            "ContentType": "application/json",
+            "TemplatePath": "templates/auth/login.json",
+            "AssertionFile": "users/login.assert.txt",
+            "ExtractAs": "authToken",
+            "MaxResponseTime": 2000,
+            "RetryCount": 1,
+            "RetryDelay": 500,
+            "MaskFields": "password",
+            "Priority": "P1",
+            "Tags": "@regression",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {
+            "username": "emilys",
+            "password": "emilyspass",
+            "expiresInMins": 30,
+            "title": "",
+            "body": "",
+            "tag1": "",
+            "tag2": "",
+            "userId": ""
+          }
+        }
+      ],
+      "test": [
+        {
+          "registry": {
+            "FlowID": "POSTS-02",
+            "TestCaseID": "POSTS-02-S2",
+            "StepOrder": 2,
+            "Phase": "test",
+            "Description": "Create a new post",
+            "Protocol": "REST",
+            "Method": "POST",
+            "Endpoint": "/posts/add",
+            "AuthType": "Bearer",
+            "ContentType": "application/json",
+            "TemplatePath": "templates/posts/create-post.json",
+            "AssertionFile": "posts/create-post.assert.txt",
+            "ExtractAs": "postId",
+            "DependsOn": "POSTS-02-S1",
+            "MaxResponseTime": 2000,
+            "RetryCount": 0,
+            "RetryDelay": 1000,
+            "Priority": "P1",
+            "Tags": "@regression",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {
+            "username": "",
+            "password": "",
+            "expiresInMins": "",
+            "title": "My Test Post via Framework",
+            "body": "This post was created by the Playwright API framework during automated testing.",
+            "tag1": "testing",
+            "tag2": "automation",
+            "userId": 1
+          }
+        },
+        {
+          "registry": {
+            "FlowID": "POSTS-02",
+            "TestCaseID": "POSTS-02-S3",
+            "StepOrder": 3,
+            "Phase": "test",
+            "Description": "Update the created post",
+            "Protocol": "REST",
+            "Method": "PUT",
+            "Endpoint": "/posts/1",
+            "AuthType": "Bearer",
+            "ContentType": "application/json",
+            "TemplatePath": "templates/posts/update-post.json",
+            "AssertionFile": "posts/update-post.assert.txt",
+            "DependsOn": "POSTS-02-S2",
+            "MaxResponseTime": 2000,
+            "RetryCount": 0,
+            "RetryDelay": 1000,
+            "Priority": "P1",
+            "Tags": "@regression",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {
+            "username": "",
+            "password": "",
+            "expiresInMins": "",
+            "title": "Updated Post Title via Framework",
+            "body": "",
+            "tag1": "",
+            "tag2": "",
+            "userId": ""
+          }
+        }
+      ],
+      "teardown": [
+        {
+          "registry": {
+            "FlowID": "POSTS-02",
+            "TestCaseID": "POSTS-02-S4",
+            "StepOrder": 4,
+            "Phase": "teardown",
+            "Description": "Delete the created post (cleanup)",
+            "Protocol": "REST",
+            "Method": "DELETE",
+            "Endpoint": "/posts/1",
+            "AuthType": "Bearer",
+            "AssertionFile": "posts/delete-post.assert.txt",
+            "MaxResponseTime": 2000,
+            "RetryCount": 0,
+            "RetryDelay": 1000,
+            "Priority": "P1",
+            "Tags": "@regression",
+            "Run": true,
+            "Environment": "QA"
+          },
+          "requestData": {}
+        }
+      ]
+    }
+  ]
+}

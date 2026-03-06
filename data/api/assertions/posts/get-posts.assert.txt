@@ -1,0 +1,30 @@
+# ── posts/get-posts.assert.txt ─────────────────────────────────────────────────
+# DummyJSON GET /posts  (public endpoint)
+
+import base/api-common.assert.txt
+
+status == 200
+responseTime < 2000ms
+
+# Pagination envelope
+body.posts exists
+body.total exists
+body.skip exists
+body.limit exists
+body.total > 0
+body.posts.length > 0
+
+# Every post has required fields
+body.posts[*].id exists
+body.posts[*].title exists
+body.posts[*].body exists
+body.posts[*].userId exists
+body.posts[*].tags exists
+body.posts[*].reactions exists
+
+# Type checks on first item
+body.posts[0].id type number
+body.posts[0].title type string
+body.posts[0].userId type number
+body.posts[0].tags type array
+body.posts[0].views type number

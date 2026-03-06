@@ -1,0 +1,9 @@
+# ── authenticated.assert.txt ───────────────────────────────────────────────────
+# Import this in assertion files for endpoints that require authentication.
+# Validates the response is not an unauthorised rejection.
+
+import base/api-common.assert.txt
+
+# Must not be 401 or 403
+status != 401
+status != 403

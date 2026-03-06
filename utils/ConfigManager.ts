@@ -19,7 +19,7 @@
  *    (terminal override → registry setting → default 'QA') are preserved.
  */
 
-import * as envData from '../data/environments.json';
+import * as envData from '../data/ui/environments.json';
 import dotenv from 'dotenv';
 import path   from 'path';
 

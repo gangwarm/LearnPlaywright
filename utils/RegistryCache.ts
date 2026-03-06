@@ -28,9 +28,9 @@
 
 import * as fs   from 'fs';
 import * as path from 'path';
-import { TestCaseData } from '../types/TestCaseData';
+import { TestCaseData } from '../types/UiTestData';
 
-const REGISTRY_PATH = path.join(__dirname, '../data/testRegistry.json');
+const REGISTRY_PATH = path.join(__dirname, '../data/ui/testRegistry.json');
 
 // Module-level singleton — built once per worker process.
 let _cache: Map<string, TestCaseData> | null = null;

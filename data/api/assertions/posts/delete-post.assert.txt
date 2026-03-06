@@ -1,0 +1,11 @@
+# ── posts/delete-post.assert.txt ───────────────────────────────────────────────
+# DummyJSON DELETE /posts/{id}
+
+import base/api-common.assert.txt
+
+status == 200
+
+body.id exists
+body.isDeleted exists
+body.isDeleted == true
+body.deletedOn exists

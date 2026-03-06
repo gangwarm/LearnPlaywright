@@ -1,0 +1,18 @@
+# ── users/get-user-profile.assert.txt ──────────────────────────────────────────
+# DummyJSON GET /auth/me  (authenticated — requires Bearer token)
+
+import base/authenticated.assert.txt
+
+status == 200
+responseTime < 2000ms
+
+body.id exists
+body.id type number
+body.username exists
+body.username type string
+body.email exists
+body.email type string
+body.firstName exists
+body.lastName exists
+body.gender exists
+body.image exists

@@ -1,0 +1,12 @@
+# ── api-common.assert.txt ──────────────────────────────────────────────────────
+# Imported by all API assertion files.
+# Rules here apply to every API test in the suite.
+
+# Server should never return 5xx
+status < 500
+
+# Response time must be under 5 seconds for all endpoints
+responseTime < 5000ms
+
+# All responses must be JSON
+header.content-type contains application/json

@@ -37,7 +37,7 @@
     "execution": {
       "enabled": true,
       "environment": "QA",
-      "browser": "webkit"
+      "browser": "all"
     },
     "data": {
       "Login": {

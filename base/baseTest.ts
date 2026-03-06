@@ -29,7 +29,7 @@
  */
 
 import { test as base, expect } from '@playwright/test';
-import { TestCaseData }         from '../types/TestCaseData';
+import { TestCaseData }         from '../types/UiTestData';
 import { getTestCase }          from '../utils/RegistryCache';
 import { browserMatches }       from '../utils/BrowserUtils';
 

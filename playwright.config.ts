@@ -39,14 +39,17 @@ import { browserMatches } from './utils/BrowserUtils';
 const BROWSER_CATALOGUE = [
     {
         name: 'chromium',
+        testMatch: '**/tests/system-testing/**/*.test.ts',
         use: { ...devices['Desktop Chrome'] },
     },
     {
         name: 'firefox',
+        testMatch: '**/tests/system-testing/**/*.test.ts',
         use: { ...devices['Desktop Firefox'] },
     },
     {
         name: 'webkit',
+        testMatch: '**/tests/system-testing/**/*.test.ts',
         use: { ...devices['Desktop Safari'] },
     },
 
@@ -68,10 +71,13 @@ const BROWSER_CATALOGUE = [
  * that ensures tests still run on first-time setup before globalSetup has run).
  */
 function getActiveProjects() {
-    const jsonPath = path.join(__dirname, 'data/testRegistry.json');
+    const jsonPath = path.join(__dirname, 'data/ui/testRegistry.json');
 
     if (!fs.existsSync(jsonPath)) {
-        console.warn('⚠️  testRegistry.json not found — running all browsers as fallback.');
+        //console.warn('⚠️  testRegistry.json not found — running all browsers as fallback.');
+            if (fs.existsSync(path.join(__dirname, 'data/testRegistry.xlsx'))) {
+            console.warn('⚠️  testRegistry.json not found — run UI tests once to generate it.');
+        }
         return BROWSER_CATALOGUE;
     }
 
@@ -161,7 +167,8 @@ export default defineConfig({
         ['html', { open: 'never' }],      // Standard HTML report
     ],
 
-    globalSetup: require.resolve('./utils/globalSetup'),
+    //globalSetup: require.resolve('./utils/globalSetup'),
+    globalSetup: require.resolve('./utils/setup/masterSetup.ts'),
 
     use: {
         trace:      'on-first-retry',
@@ -170,7 +177,15 @@ export default defineConfig({
     },
 
     /* Dynamic projects — only browsers used in the Registry are activated */
-    projects: getActiveProjects(),
+    //projects: getActiveProjects(),
+
+    projects: [
+    ...getActiveProjects(),   // ← UI (spread, dynamic as before)
+    {
+        name:      'api',     // ← API (new, no browser)
+        testMatch: '**/tests/api-testing/apiRunner.test.ts',
+    },
+]
 
     /*
      * SHARDING (for 5,000+ tests on CI):

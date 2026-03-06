@@ -36,16 +36,16 @@ import {
     REQUIRED_REGISTRY_COLUMNS,
     RequiredRegistryColumn,
     TestCaseData,
-} from '../types/TestCaseData';
+} from '../../types/UiTestData';
 
 // Load .env so we can validate envPassKey values during setup
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
-const EXCEL_PATH   = path.join(__dirname, '../data/testRegistry.xlsx');
-const JSON_PATH    = path.join(__dirname, '../data/testRegistry.json');
-const ENV_PATH     = path.join(__dirname, '../data/environments.json');
+const EXCEL_PATH   = path.join(__dirname, '../../data/ui/testRegistry.xlsx');
+const JSON_PATH    = path.join(__dirname, '../../data/ui/testRegistry.json');
+const ENV_PATH     = path.join(__dirname, '../../data/ui/environments.json');
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
