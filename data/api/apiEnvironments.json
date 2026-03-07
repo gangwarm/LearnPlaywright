@@ -1,8 +1,10 @@
 {
   "QA": {
-    "apiBaseUrl": "https://dummyjson.com"
+    "apiBaseUrl": "https://dummyjson.com",
+    "defaultMaxResponseTime": 3000
   },
   "PROD": {
-    "apiBaseUrl": "https://dummyjson.com"
+    "apiBaseUrl": "https://dummyjson.com",
+    "defaultMaxResponseTime": 2000
   }
 }

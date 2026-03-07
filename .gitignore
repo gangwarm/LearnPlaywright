@@ -13,11 +13,21 @@ playwright/.cache/
 
 # ─── Generated files (re-created by globalSetup on every run) ────────────────
 # testRegistry.json is generated from testRegistry.xlsx — no need to commit it.
-# If your CI pipeline does not run globalSetup first, remove this line.
-data/testRegistry.json
+# apiRegistry.json is generated from apiRegistry.xlsx — no need to commit it.
+data/ui/testRegistry.json
+data/api/apiRegistry.json
 
 # ─── OS / Editor ─────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 .vscode/
 *.log
+
+# API response logs — evidence files, not committed to source control
+data/api/response-logs/
+
+# API request logs — resolved requests sent to API, not committed to source control
+data/api/request-logs/
+
+# API assertion results
+data/api/assertion-results/

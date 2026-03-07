@@ -9,10 +9,10 @@
  *  2. Validates required columns are present in APIRegistry sheet
  *  3. Validates APIRequests sheet is present
  *  4. Pre-indexes both sheets into Maps for O(1) lookup
- *  5. Groups steps by FlowID and sorts by StepOrder
- *  6. Validates every AssertionFile path exists on disk
- *  7. Validates every TemplatePath exists on disk
- *  8. Validates every SchemaFile path exists on disk
+ *  5. Validates enum columns (Method, AuthType, Phase, Protocol, Priority)
+ *  6. Groups steps by FlowID and sorts by StepOrder
+ *  7. Validates every AssertionFile path exists on disk
+ *  8. Validates every TemplatePath exists on disk
  *  9. Warns about missing .env keys referenced as {{env.*}} in endpoints
  * 10. Writes apiRegistry.json to data/
  */
@@ -92,7 +92,39 @@ async function apiGlobalSetup(_config: FullConfig): Promise<void> {
         );
     }
 
-    // ── 4. Parse APIRequests sheet ────────────────────────────────────────────
+    // ── 4. Validate enum columns ──────────────────────────────────────────────
+    const VALID_METHODS   = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+    const VALID_AUTH      = new Set(['Bearer', 'Basic', 'ApiKey', 'None']);
+    const VALID_PHASES    = new Set(['setup', 'test', 'teardown']);
+    const VALID_PROTOCOLS = new Set(['REST', 'GRAPHQL']);
+    const VALID_PRIORITY  = new Set(['P0', 'P1', 'P2', 'P3']);
+
+    const enumErrors: string[] = [];
+
+    for (const rawRow of registryRaw) {
+        const flowId    = String(rawRow['FlowID']    ?? '').trim();
+        const stepId    = String(rawRow['TestCaseID'] ?? '').trim();
+        const ref       = flowId && stepId ? `[${flowId} / ${stepId}]` : `[row: ${JSON.stringify(rawRow)}]`;
+
+        const method    = String(rawRow['Method']   ?? '').trim().toUpperCase();
+        const authType  = String(rawRow['AuthType'] ?? '').trim();
+        const phase     = String(rawRow['Phase']    ?? '').trim().toLowerCase();
+        const protocol  = String(rawRow['Protocol'] ?? '').trim().toUpperCase();
+        const priority  = String(rawRow['Priority'] ?? '').trim();
+
+        if (method   && !VALID_METHODS.has(method))     enumErrors.push(`${ref} Method="${method}" — valid: ${[...VALID_METHODS].join(', ')}`);
+        if (authType && !VALID_AUTH.has(authType))       enumErrors.push(`${ref} AuthType="${authType}" — valid: ${[...VALID_AUTH].join(', ')}`);
+        if (phase    && !VALID_PHASES.has(phase))        enumErrors.push(`${ref} Phase="${phase}" — valid: ${[...VALID_PHASES].join(', ')}`);
+        if (protocol && !VALID_PROTOCOLS.has(protocol))  enumErrors.push(`${ref} Protocol="${protocol}" — valid: ${[...VALID_PROTOCOLS].join(', ')}`);
+        if (priority && !VALID_PRIORITY.has(priority))   enumErrors.push(`${ref} Priority="${priority}" — valid: ${[...VALID_PRIORITY].join(', ')}`);
+    }
+
+    if (enumErrors.length > 0) {
+        throw new Error(
+            `[apiGlobalSetup] Invalid enum values found in APIRegistry sheet. Fix these rows in apiRegistry.xlsx:\n\n` +
+            enumErrors.map(e => `  ✗ ${e}`).join('\n') + '\n'
+        );
+    }
     const requestsMap = new Map<string, Record<string, string | number | boolean>>();
 
     if (workbook.SheetNames.includes('APIRequests')) {

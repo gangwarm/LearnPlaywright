@@ -60,15 +60,17 @@ interface UiTestEntry {
 }
 
 interface ApiTestEntry {
-    kind:         'api';
-    title:        string;
-    flowId:       string;
-    tags:         string;
-    priority:     string;
-    status:       'passed' | 'failed' | 'skipped';
-    error:        string;
-    duration:     number;   // ms
-    isFlaky:      boolean;
+    kind:             'api';
+    title:            string;
+    flowId:           string;
+    tags:             string;
+    priority:         string;
+    status:           'passed' | 'failed' | 'skipped';
+    error:            string;
+    duration:         number;   // ms
+    isFlaky:          boolean;
+    assertionsPassed: number;   // e.g. 7
+    assertionsTotal:  number;   // e.g. 8
 }
 
 type TestEntry = UiTestEntry | ApiTestEntry;
@@ -183,6 +185,19 @@ class CustomHTMLReporter implements Reporter {
         const prioMatch  = tags.match(/@(P[0-3])/i);
         const priority   = prioMatch ? prioMatch[1].toUpperCase() : 'N/A';
 
+        // Parse assertion counts from stdout: "[apiTest:assertions] FLOW-01 7/8"
+        let assertionsPassed = 0;
+        let assertionsTotal  = 0;
+        for (const chunk of result.stdout) {
+            const text  = typeof chunk === 'string' ? chunk : chunk.toString();
+            const match = text.match(/\[apiTest:assertions\]\s+\S+\s+(\d+)\/(\d+)/);
+            if (match) {
+                assertionsPassed = parseInt(match[1], 10);
+                assertionsTotal  = parseInt(match[2], 10);
+                break;
+            }
+        }
+
         let status: 'passed' | 'failed' | 'skipped' = 'passed';
         if      (result.status === 'failed')  status = 'failed';
         else if (result.status === 'skipped') status = 'skipped';
@@ -190,7 +205,7 @@ class CustomHTMLReporter implements Reporter {
         const existing = this.apiResults.get(flowId);
         if (!existing) {
             this.apiResults.set(flowId, {
-                kind:     'api',
+                kind:             'api',
                 title,
                 flowId,
                 tags,
@@ -199,8 +214,10 @@ class CustomHTMLReporter implements Reporter {
                 error:    result.status === 'failed'
                               ? (result.error?.message?.split('\n')[0] ?? 'Flow failed')
                               : '',
-                duration: result.duration,
-                isFlaky:  test.outcome() === 'flaky',
+                duration:         result.duration,
+                isFlaky:          test.outcome() === 'flaky',
+                assertionsPassed,
+                assertionsTotal,
             });
         } else {
             // Worst status wins
@@ -209,6 +226,11 @@ class CustomHTMLReporter implements Reporter {
                 existing.error = result.error?.message?.split('\n')[0] ?? 'Flow failed';
             }
             if (test.outcome() === 'flaky') existing.isFlaky = true;
+            // Accumulate assertion counts if re-run
+            if (assertionsTotal > 0) {
+                existing.assertionsPassed = assertionsPassed;
+                existing.assertionsTotal  = assertionsTotal;
+            }
         }
     }
 
@@ -614,13 +636,14 @@ class CustomHTMLReporter implements Reporter {
             '<th style="width:11%">Error</th>',
             '<th class="c" style="width:7%">Trace</th>',
         ].join('') : [
-            '<th style="width:22%">Flow ID</th>',
-            '<th style="width:30%">Description</th>',
+            '<th style="width:20%">Flow ID</th>',
+            '<th style="width:27%">Description</th>',
             '<th style="width:8%">Priority</th>',
             '<th style="width:10%">Tags</th>',
             '<th class="c" style="width:8%">Duration</th>',
-            '<th class="c" style="width:8%">Status</th>',
-            '<th style="width:14%">Error</th>',
+            '<th class="c" style="width:9%">Assertions</th>',
+            '<th class="c" style="width:7%">Status</th>',
+            '<th style="width:11%">Error</th>',
         ].join('');
 
         return [
@@ -716,6 +739,12 @@ class CustomHTMLReporter implements Reporter {
         if      (r.duration >= 1000) durClass = 'dur-slow';
         else if (r.duration >= 500)  durClass = 'dur-ok';
 
+        // Assertion count pill: "7 / 8" — red if any failed, green if all passed
+        const assertHtml = r.assertionsTotal > 0
+            ? '<span class="assert-pill assert-pill-' + (r.assertionsPassed === r.assertionsTotal ? 'pass' : 'fail') + '">'
+              + r.assertionsPassed + ' / ' + r.assertionsTotal + '</span>'
+            : '<span class="na-dash">\u2014</span>';
+
         const tagPills = r.tags
             ? r.tags.split(/\s+/).filter(t => t.startsWith('@') && !t.match(/@P[0-3]/i))
                 .map(t => '<span class="tag">' + h(t) + '</span>').join('')
@@ -730,6 +759,7 @@ class CustomHTMLReporter implements Reporter {
             '<td><span class="badge ' + prioClass + '">' + h(r.priority) + '</span></td>',
             '<td>' + (tagPills || '<span class="na-dash">\u2014</span>') + '</td>',
             '<td class="c"><span class="mono-label ' + durClass + '">' + r.duration + 'ms</span></td>',
+            '<td class="c">' + assertHtml + '</td>',
             '<td class="c">' + statusHtml + '</td>',
             '<td>' + (r.error ? '<span class="err-msg">' + h(r.error) + '</span>' : '') + '</td>',
             '</tr>',
@@ -928,6 +958,9 @@ td.c{text-align:center;}
 .dur-fast{color:var(--pass);}
 .dur-ok{color:var(--warn);}
 .dur-slow{color:var(--fail);}
+.assert-pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;}
+.assert-pill-pass{background:#D1FAE5;color:#065F46;}
+.assert-pill-fail{background:#FEE2E2;color:#991B1B;}
 
 /* Browser icon */
 .br{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:5px;border:1px solid;}
