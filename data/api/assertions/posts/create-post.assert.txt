@@ -3,7 +3,7 @@
 
 import base/api-common.assert.txt
 
-status == 201
+status == 200
 
 body.id exists
 body.id type number

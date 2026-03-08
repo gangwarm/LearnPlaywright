@@ -34,9 +34,10 @@
 12. [Environments](#environments)
 13. [Tags and Filtering](#tags-and-filtering)
 14. [Reports](#reports)
-15. [Adding a New Test — Step by Step](#adding-a-new-test--step-by-step)
-16. [Troubleshooting](#troubleshooting)
-17. [Assertion Quick Reference](#assertion-quick-reference)
+15. [Debugging a Failure](#debugging-a-failure)
+16. [Adding a New Test — Step by Step](#adding-a-new-test--step-by-step)
+17. [Troubleshooting](#troubleshooting)
+18. [Assertion Quick Reference](#assertion-quick-reference)
 
 ---
 
@@ -62,7 +63,7 @@ apiRegistry.xlsx
       ▼
 apiGlobalSetup.ts          ← runs once before all tests
   reads Excel
-  validates columns
+  validates columns & enum values
   generates apiRegistry.json
       │
       ▼
@@ -74,8 +75,11 @@ apiRunner.test.ts          ← one generic runner, never edited
 apiTest.ts (fixture)       ← orchestrates each flow
   builds HTTP request
   sends request
-  extracts values for chaining
+  saves request log  → test-results/api/request-logs/
   runs assertion file
+  saves response log → test-results/api/response-logs/
+  saves assertion results → test-results/api/assertion-results/
+  extracts values for chaining
   returns pass/fail
       │
       ▼
@@ -105,7 +109,7 @@ project-root/
 ├── data/
 │   └── api/
 │       ├── apiRegistry.xlsx       ← ✏️  TESTER EDITS THIS
-│       ├── apiEnvironments.json   ← Environment base URLs
+│       ├── apiEnvironments.json   ← Environment base URLs + global response time
 │       ├── assertions/            ← ✏️  TESTER CREATES THESE
 │       │   ├── base/
 │       │   │   └── api-common.assert.txt
@@ -116,6 +120,18 @@ project-root/
 │       └── templates/             ← ✏️  TESTER CREATES THESE
 │           └── auth/
 │               └── login.json
+│
+├── test-results/                  ← Auto-generated (gitignored)
+│   └── api/
+│       ├── request-logs/          ← Resolved request per step (JSON)
+│       │   └── 2026-03-08-09-53/
+│       │       └── POSTS-02_POSTS-02-S2.json
+│       ├── response-logs/         ← Full response per step (JSON)
+│       │   └── 2026-03-08-09-53/
+│       │       └── POSTS-02_POSTS-02-S2.json
+│       └── assertion-results/     ← Pass/fail per assertion per step (TXT)
+│           └── 2026-03-08-09-53/
+│               └── POSTS-02_POSTS-02-S2.txt
 │
 ├── tests/
 │   └── api-testing/
@@ -692,18 +708,22 @@ Teardown always runs — if the test step fails, the created post is still delet
 
 ## Environments
 
-Configure base URLs per environment in `data/api/apiEnvironments.json`:
+Configure base URLs and global response time per environment in `data/api/apiEnvironments.json`:
 
 ```json
 {
   "QA": {
-    "apiBaseUrl": "https://dummyjson.com"
+    "apiBaseUrl": "https://dummyjson.com",
+    "defaultMaxResponseTime": 3000
   },
   "PROD": {
-    "apiBaseUrl": "https://api.yourapp.com"
+    "apiBaseUrl": "https://api.yourapp.com",
+    "defaultMaxResponseTime": 2000
   }
 }
 ```
+
+`defaultMaxResponseTime` is applied automatically to every step that does not have a `MaxResponseTime` column value and does not already have a `responseTime` assertion in its assert file. Step-level settings always win over the global threshold.
 
 ### Switch environments at runtime
 
@@ -760,7 +780,7 @@ An HTML report is automatically generated after every run.
 
 ```
 custom-reports/
-└── LearnPlaywright-2026-03-06-10-01.html
+└── LearnPlaywright-2026-03-08-09-53.html
 ```
 
 ### Open the last report
@@ -780,9 +800,80 @@ npx playwright show-report
 - Response time distribution chart (fast / ok / slow / very slow)
 - Priority distribution chart
 - Tag coverage chart
-- Flow results table with Flow ID, description, priority, tags, duration, status, error
+- Flow results table with Flow ID, description, priority, tags, duration, assertion count pill, status, error
 
 **Filters** — filter by pass / fail / skip / flaky status. Search by flow ID, tag, or description.
+
+**Assertion count pill** — shows `13 / 14` in green if all pass, red if any fail. Visible per flow in the table.
+
+**Error column** — on failure shows the first failed step and assertion with actual value e.g. `POSTS-02-S2: status == 200 → got 201 (+2 more)`. Hover for full message.
+
+---
+
+## Debugging a Failure
+
+When a test fails, three files are written to `test-results/api/` — all with the same filename (`<FlowID>_<StepID>`) for easy side-by-side comparison:
+
+### 1. Request log — `test-results/api/request-logs/<run>/<FlowID>_<StepID>.json`
+
+What was sent to the API — method, URL, headers, resolved request body. Useful for debugging template or placeholder issues.
+
+```json
+{
+  "meta": { "flowId": "POSTS-02", "stepId": "POSTS-02-S2", ... },
+  "request": {
+    "method": "POST",
+    "url": "https://dummyjson.com/posts/add",
+    "headers": { "Authorization": "Bearer ..." },
+    "body": { "title": "My Post", "userId": 1 }
+  }
+}
+```
+
+### 2. Response log — `test-results/api/response-logs/<run>/<FlowID>_<StepID>.json`
+
+What came back from the API — status, headers, full response body, assertion summary.
+
+```json
+{
+  "meta": { "flowId": "POSTS-02", "stepId": "POSTS-02-S2", "passed": false },
+  "response": { "status": 201, "responseTime": 49, "body": { ... } },
+  "assertions": { "total": 14, "passed": 13, "failed": [...] }
+}
+```
+
+### 3. Assertion results — `test-results/api/assertion-results/<run>/<FlowID>_<StepID>.txt`
+
+Every assertion from the assert file with pass/fail status and actual value — in the same order as the assert file.
+
+```
+═════════════════════════════════════════════════════════════════
+FLOW:    POSTS-02
+STEP:    POSTS-02-S2
+DESC:    Create a new post
+DATE:    2026-03-08 09:53:43
+RESULT:  ❌ FAILED (13/14)
+═════════════════════════════════════════════════════════════════
+
+  ✅  status < 500                                actual: 201
+  ✅  responseTime < 5000ms                       actual: 49ms
+  ❌  status == 200                               actual: 201
+                                                  expected: 200
+  ✅  body.id exists                              actual: 252
+  ...
+
+─────────────────────────────────────────────────────────────────
+FAILURES:
+
+  ✗  status == 200
+     actual:   201
+     expected: 200
+     message:  Assertion failed: "status" == 200 — actual: 201
+```
+
+**MaskFields** — values listed in the `MaskFields` column are replaced with `***MASKED***` in both request and response logs. The assertion results file is not masked — it shows actual values for debugging.
+
+**Run pruning** — the last 5 timestamped run folders are kept automatically. Older folders are deleted.
 
 ---
 

@@ -45,20 +45,25 @@ export class AssertionEngine {
         const passed: AssertionOutcome[] = [];
         const failed: AssertionOutcome[] = [];
 
-        for (const assertion of assertions) {
+        for (let i = 0; i < assertions.length; i++) {
+            const assertion = assertions[i];
             try {
                 const outcome = this.evaluate(assertion, response);
+                // Attach original file index so consumers can restore order
+                (outcome as any)._index = i;
                 if (outcome.passed) {
                     passed.push(outcome);
                 } else {
                     failed.push(outcome);
                 }
             } catch (err) {
-                failed.push({
+                const errOutcome: AssertionOutcome = {
                     rule:    assertion.raw,
                     passed:  false,
                     message: `Assertion evaluation error: ${(err as Error).message}`,
-                });
+                };
+                (errOutcome as any)._index = i;
+                failed.push(errOutcome);
             }
         }
 

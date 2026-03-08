@@ -8,14 +8,15 @@
  *  - runFlow() — executes setup → test → teardown for a given FlowID
  *
  * FEATURES:
- *  - Request logging    : every step's resolved request saved to data/api/request-logs/<run>/
- *  - Response logging   : every step's response saved to data/api/response-logs/<run>/
- *  - Same filename      : <FlowID>_<StepID>.json in both folders — easy to compare side by side
- *  - MaskFields         : sensitive values replaced with ***MASKED*** in both request and response
- *  - Global RT check    : defaultMaxResponseTime from apiEnvironments.json auto-applied
- *  - Assertion counts   : assertionsPassed / assertionsTotal available per step
- *  - Log paths on fail  : console prints both request and response log paths
- *  - Run pruning        : keeps last 5 run folders in both log dirs, deletes older ones
+ *  - Request logging      : every step's resolved request saved to test-results/api/request-logs/<run>/
+ *  - Response logging     : every step's response saved to test-results/api/response-logs/<run>/
+ *  - Assertion results    : every step's assertion detail saved to test-results/api/assertion-results/<run>/
+ *  - Same filename        : <FlowID>_<StepID>.json/txt in all three folders — easy to compare
+ *  - MaskFields           : sensitive values replaced with ***MASKED*** in request and response
+ *  - Global RT check      : defaultMaxResponseTime from apiEnvironments.json auto-applied
+ *  - Assertion counts     : assertionsPassed / assertionsTotal available per step
+ *  - Log paths on fail    : console prints request, response and assertion log paths
+ *  - Run pruning          : keeps last 5 run folders in all log dirs, deletes older ones
  *
  * USAGE:
  *   import { test, expect } from '../fixtures/apiTest';
@@ -54,8 +55,11 @@ const DATA_DIR       = path.join(__dirname, '../../data/api');
 const REGISTRY_JSON  = path.join(DATA_DIR, 'apiRegistry.json');
 const ASSERTIONS_DIR = path.join(DATA_DIR, 'assertions');
 const ENV_PATH       = path.join(DATA_DIR, 'apiEnvironments.json');
-const RESPONSE_LOGS  = path.join(DATA_DIR, 'response-logs');
-const REQUEST_LOGS   = path.join(DATA_DIR, 'request-logs');
+
+const TEST_RESULTS_API  = path.join(__dirname, '../../test-results/api');
+const RESPONSE_LOGS     = path.join(TEST_RESULTS_API, 'response-logs');
+const REQUEST_LOGS      = path.join(TEST_RESULTS_API, 'request-logs');
+const ASSERTION_RESULTS = path.join(TEST_RESULTS_API, 'assertion-results');
 
 // One timestamped folder shared across all steps in this run
 const RUN_TIMESTAMP = (() => {
@@ -128,13 +132,15 @@ export const test = base.extend<ApiFixtures>({
         const envConfig = getEnvConfig();
 
         // ── Create run log folders, prune old runs (keep last 5) ─────────────
-        const runLogDir     = path.join(RESPONSE_LOGS, RUN_TIMESTAMP);
-        const runReqLogDir  = path.join(REQUEST_LOGS,  RUN_TIMESTAMP);
-        if (!fs.existsSync(runLogDir))    fs.mkdirSync(runLogDir,    { recursive: true });
-        if (!fs.existsSync(runReqLogDir)) fs.mkdirSync(runReqLogDir, { recursive: true });
+        const runLogDir        = path.join(RESPONSE_LOGS,     RUN_TIMESTAMP);
+        const runReqLogDir     = path.join(REQUEST_LOGS,      RUN_TIMESTAMP);
+        const runAssertionsDir = path.join(ASSERTION_RESULTS, RUN_TIMESTAMP);
+        if (!fs.existsSync(runLogDir))        fs.mkdirSync(runLogDir,        { recursive: true });
+        if (!fs.existsSync(runReqLogDir))     fs.mkdirSync(runReqLogDir,     { recursive: true });
+        if (!fs.existsSync(runAssertionsDir)) fs.mkdirSync(runAssertionsDir, { recursive: true });
 
         try {
-            for (const root of [RESPONSE_LOGS, REQUEST_LOGS]) {
+            for (const root of [RESPONSE_LOGS, REQUEST_LOGS, ASSERTION_RESULTS]) {
                 const allRuns = fs.readdirSync(root)
                     .filter(d => /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}$/.test(d))
                     .sort();
@@ -192,7 +198,7 @@ export const test = base.extend<ApiFixtures>({
                 return clone;
             };
 
-            // ── Write request log → data/api/request-logs/<run>/<FlowID>_<StepID>.json
+            // ── Write request log → test-results/api/request-logs/<run>/<FlowID>_<StepID>.json
             const writeRequestLog = (
                 step:    ApiTestStep,
                 reqMeta: { method: string; url: string; headers: Record<string, string>; body: unknown },
@@ -224,7 +230,7 @@ export const test = base.extend<ApiFixtures>({
                 }
             };
 
-            // ── Write response log → data/api/response-logs/<run>/<FlowID>_<StepID>.json
+            // ── Write response log → test-results/api/response-logs/<run>/<FlowID>_<StepID>.json
             const writeResponseLog = (
                 step:       ApiTestStep,
                 response:   ApiResponse,
@@ -266,7 +272,94 @@ export const test = base.extend<ApiFixtures>({
                 return filePath;
             };
 
-            // ── Run a single step ─────────────────────────────────────────────
+            // ── Write assertion results → test-results/api/assertion-results/<run>/<FlowID>_<StepID>.txt
+            const writeAssertionResults = (
+                step:       ApiTestStep,
+                assertions: AssertionResult,
+                response:   ApiResponse,
+                passed:     boolean,
+            ): void => {
+                const { registry } = step;
+                const fileName     = `${registry.FlowID}_${registry.TestCaseID}.txt`;
+                const filePath     = path.join(runAssertionsDir, fileName);
+
+                const now     = new Date();
+                const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ` +
+                                `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+
+                const resultLabel = passed
+                    ? `✅ PASSED (${assertions.passed.length}/${assertions.total})`
+                    : `❌ FAILED (${assertions.passed.length}/${assertions.total})`;
+
+                const dividerTop = '═'.repeat(65);
+                const dividerMid = '─'.repeat(65);
+
+                const formatValue = (v: unknown, rule?: string): string => {
+                    if (v === null || v === undefined) return 'null';
+                    // Append ms suffix for responseTime actual values
+                    if (typeof v === 'number' && rule && rule.startsWith('responseTime')) return `${v}ms`;
+                    if (typeof v === 'string') return v;
+                    return String(v);
+                };
+
+                // Restore original assertion file order using _index set by AssertionEngine
+                const allOutcomes = [
+                    ...assertions.passed.map(o => ({ ...o, passed: true  as const })),
+                    ...assertions.failed.map(o => ({ ...o, passed: false as const })),
+                ].sort((a, b) => ((a as any)._index ?? 0) - ((b as any)._index ?? 0));
+
+                const RULE_COL = 44; // column width for rule before actual:
+
+                const assertionLines = allOutcomes.map(outcome => {
+                    const icon    = outcome.passed ? '✅' : '❌';
+                    const padding = Math.max(1, RULE_COL - outcome.rule.length);
+                    const actual  = `actual: ${formatValue(outcome.actual, outcome.rule)}`;
+                    const line    = `  ${icon}  ${outcome.rule}${' '.repeat(padding)}${actual}`;
+
+                    if (!outcome.passed && outcome.expected !== undefined && outcome.expected !== null) {
+                        // "  ❌  " = 6 chars prefix + RULE_COL chars for rule + padding = start of actual:
+                        // expected: must start at same column as actual:
+                        const actualStart = 6 + RULE_COL; // 6 prefix + 44 rule col = 50
+                        return `${line}\n${' '.repeat(actualStart)}expected: ${formatValue(outcome.expected)}`;
+                    }
+                    return line;
+                }).join('\n');
+
+                // Failures summary — single divider, no blank line before FAILURES
+                const failureBlock = assertions.failed.length > 0
+                    ? 'FAILURES:\n\n' +
+                      assertions.failed.map(f => [
+                          `  ✗  ${f.rule}`,
+                          `     actual:   ${formatValue(f.actual, f.rule)}`,
+                          ...(f.expected !== undefined && f.expected !== null ? [`     expected: ${formatValue(f.expected)}`] : []),
+                          ...(f.message ? [`     message:  ${f.message}`] : []),
+                      ].join('\n')).join('\n\n')
+                    : '';
+
+                const sections = [
+                    dividerTop,
+                    `FLOW:    ${registry.FlowID}`,
+                    `STEP:    ${registry.TestCaseID}`,
+                    `DESC:    ${registry.Description}`,
+                    `DATE:    ${dateStr}`,
+                    `RESULT:  ${resultLabel}`,
+                    dividerTop,
+                    '',
+                    assertionLines,
+                    '',
+                    dividerMid,
+                ];
+
+                if (failureBlock) sections.push(failureBlock);
+
+                const content = sections.join('\n');
+
+                try {
+                    fs.writeFileSync(filePath, content, 'utf-8');
+                } catch (err) {
+                    console.warn(`[apiTest] Could not write assertion results: ${(err as Error).message}`);
+                }
+            };
             const runStep = async (step: ApiTestStep): Promise<StepResult> => {
                 const { registry } = step;
 
@@ -346,6 +439,9 @@ export const test = base.extend<ApiFixtures>({
                     stepPassed,
                 );
 
+                // ── Save assertion results ────────────────────────────────────
+                writeAssertionResults(step, assertionResult, response, stepPassed);
+
                 return {
                     stepId:           registry.TestCaseID,
                     description:      registry.Description,
@@ -393,9 +489,11 @@ export const test = base.extend<ApiFixtures>({
                         if (failure.message) console.error(`      ${failure.message}`);
                     }
                     if (step.logFile) {
-                        const reqFile = step.logFile.replace('response-logs', 'request-logs');
-                        console.error(`    📤 Request log:  ${reqFile}`);
-                        console.error(`    📥 Response log: ${step.logFile}`);
+                        const reqFile    = step.logFile.replace('response-logs', 'request-logs');
+                        const assertFile = step.logFile.replace('response-logs', 'assertion-results').replace('.json', '.txt');
+                        console.error(`    📤 Request log:    ${reqFile}`);
+                        console.error(`    📥 Response log:   ${step.logFile}`);
+                        console.error(`    🔍 Assertions log: ${assertFile}`);
                     }
                 }
             }

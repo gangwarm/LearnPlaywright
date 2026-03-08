@@ -203,6 +203,29 @@ class CustomHTMLReporter implements Reporter {
         else if (result.status === 'skipped') status = 'skipped';
 
         const existing = this.apiResults.get(flowId);
+
+        // Build a meaningful error summary from the structured failure message.
+        // apiRunner.test.ts throws with format:
+        //   Flow "POSTS-02" failed:\n  ✕ [POSTS-02-S2] ...\n    ✗ status == 200\n      expected 200...
+        // We extract: first failed step ID + first failed rule + overflow count
+        const buildErrorSummary = (msg: string): string => {
+            const lines     = msg.split('\n').map(l => l.trim()).filter(Boolean);
+            const stepLine  = lines.find(l => l.startsWith('✕'));
+            const stepId    = stepLine ? stepLine.match(/\[([^\]]+)\]/)?.[1] ?? '' : '';
+            const ruleLines = lines.filter(l => l.startsWith('✗'));
+            if (!ruleLines.length) return lines[0] ?? 'Flow failed';
+            const first     = ruleLines[0].replace(/^✗\s*/, '');
+            // Extract actual value from message line that follows the rule
+            const ruleIdx   = lines.indexOf('✗ ' + ruleLines[0].replace(/^✗\s*/, ''));
+            const msgLine   = lines[ruleIdx + 1] ?? '';
+            const actual    = msgLine.match(/actual[:\s]+(.+)/i)?.[1]
+                           ?? msgLine.match(/got[:\s]+(.+)/i)?.[1]
+                           ?? '';
+            const extra     = ruleLines.length > 1 ? ` (+${ruleLines.length - 1} more)` : '';
+            const arrow     = actual ? ` → got ${actual}` : '';
+            return stepId ? `${stepId}: ${first}${arrow}${extra}` : `${first}${arrow}${extra}`;
+        };
+
         if (!existing) {
             this.apiResults.set(flowId, {
                 kind:             'api',
@@ -212,7 +235,7 @@ class CustomHTMLReporter implements Reporter {
                 priority,
                 status,
                 error:    result.status === 'failed'
-                              ? (result.error?.message?.split('\n')[0] ?? 'Flow failed')
+                              ? buildErrorSummary(result.error?.message ?? 'Flow failed')
                               : '',
                 duration:         result.duration,
                 isFlaky:          test.outcome() === 'flaky',
@@ -223,7 +246,7 @@ class CustomHTMLReporter implements Reporter {
             // Worst status wins
             if (status === 'failed') existing.status = 'failed';
             if (result.status === 'failed' && !existing.error) {
-                existing.error = result.error?.message?.split('\n')[0] ?? 'Flow failed';
+                existing.error = buildErrorSummary(result.error?.message ?? 'Flow failed');
             }
             if (test.outcome() === 'flaky') existing.isFlaky = true;
             // Accumulate assertion counts if re-run
@@ -636,14 +659,14 @@ class CustomHTMLReporter implements Reporter {
             '<th style="width:11%">Error</th>',
             '<th class="c" style="width:7%">Trace</th>',
         ].join('') : [
-            '<th style="width:20%">Flow ID</th>',
+            '<th style="width:13%">Flow ID</th>',
             '<th style="width:27%">Description</th>',
             '<th style="width:8%">Priority</th>',
             '<th style="width:10%">Tags</th>',
             '<th class="c" style="width:8%">Duration</th>',
             '<th class="c" style="width:9%">Assertions</th>',
             '<th class="c" style="width:7%">Status</th>',
-            '<th style="width:11%">Error</th>',
+            '<th style="width:18%">Error</th>',
         ].join('');
 
         return [
@@ -761,7 +784,7 @@ class CustomHTMLReporter implements Reporter {
             '<td class="c"><span class="mono-label ' + durClass + '">' + r.duration + 'ms</span></td>',
             '<td class="c">' + assertHtml + '</td>',
             '<td class="c">' + statusHtml + '</td>',
-            '<td>' + (r.error ? '<span class="err-msg">' + h(r.error) + '</span>' : '') + '</td>',
+            '<td>' + (r.error ? '<span class="err-msg" title="' + h(r.error) + '">' + h(r.error) + '</span>' : '') + '</td>',
             '</tr>',
         ].join('');
     }
@@ -982,7 +1005,7 @@ td.c{text-align:center;}
 .st-na .sd{background:var(--ink-4);}
 
 /* Error & misc */
-.err-msg{display:block;font-family:var(--font-mono);font-size:10.5px;color:var(--fail);background:var(--fail-lt);padding:4px 8px;border-radius:4px;border-left:2.5px solid var(--fail);word-break:break-all;line-height:1.5;}
+.err-msg{display:block;font-family:var(--font-mono);font-size:10.5px;color:var(--fail);background:var(--fail-lt);padding:4px 8px;border-radius:4px;border-left:2.5px solid var(--fail);line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help;}
 .trace-link{display:inline-flex;align-items:center;gap:4px;color:var(--blue);font-size:11px;font-weight:600;text-decoration:none;}
 .trace-link:hover{color:#1D4ED8;text-decoration:underline;}
 .na-dash{color:var(--ink-4);}
