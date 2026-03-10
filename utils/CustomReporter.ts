@@ -45,24 +45,30 @@ type BrowserKey    = 'chromium' | 'firefox' | 'webkit';
 type BrowserStatus = 'passed' | 'failed' | 'skipped' | '-';
 
 interface UiTestEntry {
-    kind:        'ui';
-    title:       string;
-    tcId:        string;
-    priority:    string;
-    testType:    string;
-    environment: string;
-    userRole:    string;
-    tags:        string;
-    browsers:    Record<BrowserKey, BrowserStatus>;
-    error:       string;
-    isFlaky:     boolean;
-    trace:       string;
+    kind:          'ui';
+    title:         string;
+    tcId:          string;
+    priority:      string;
+    testType:      string;
+    environment:   string;
+    userRole:      string;
+    tags:          string;
+    browsers:      Record<BrowserKey, BrowserStatus>;
+    duration:      Record<BrowserKey, number>;   // ms per browser — max shown in report
+    errorSummary:  string;   // e.g. "Assertion failed: toHaveText()"
+    errorExpected: string;   // e.g. "2"
+    errorReceived: string;   // e.g. "3"
+    isFlaky:       boolean;
+    // Expand panel (failed rows only)
+    screenshotPath: string;  // relative path from report file → data/<ts>/<file>.png
+    failedSteps:    Array<{ title: string; error: string; file: string; line: number }>;
 }
 
 interface ApiTestEntry {
     kind:             'api';
     title:            string;
     flowId:           string;
+    testType:         string;
     tags:             string;
     priority:         string;
     status:           'passed' | 'failed' | 'skipped';
@@ -89,15 +95,56 @@ function h(str: string | undefined | null): string {
 
 // ─── Reporter ─────────────────────────────────────────────────────────────────
 
+// ─── Defect category classifier ───────────────────────────────────────────────
+
+function classifyDefect(errorMsg: string): string {
+    if (!errorMsg)                                                   return 'Unknown';
+    const m = errorMsg.toLowerCase();
+    if (/timed? ?out|timeout|navigation|net::/i.test(m))            return 'Timeout / Network';
+    if (/status.*==|status code|got 4\d\d|got 5\d\d/i.test(m))     return 'Wrong Status Code';
+    if (/tohavetext|tocontain|expect\.\w+\(\) failed/i.test(m))     return 'Assertion Error';
+    if (/no element|locator|not visible|not found|selector/i.test(m)) return 'Element Not Found';
+    if (/schema|required|additional prop|must be/i.test(m))         return 'Schema Violation';
+    if (/unauthori[sz]ed|forbidden|401|403/i.test(m))               return 'Auth Failure';
+    return 'Other Failure';
+}
+
+// ─── Reporter ─────────────────────────────────────────────────────────────────
+
 class CustomHTMLReporter implements Reporter {
-    private uiResults  = new Map<string, UiTestEntry>();
-    private apiResults = new Map<string, ApiTestEntry>();
-    private startTime  = 0;
-    private projectName = 'Project';
+    private uiResults     = new Map<string, UiTestEntry>();
+    private apiResults    = new Map<string, ApiTestEntry>();
+    private startTime     = 0;
+    private projectName   = 'Project';
+    private envInfo: { name: string } | null = null;
+    private screenshotDir = '';   // set in onEnd: custom-reports/data/<timestamp>/
 
     onBegin(config: FullConfig): void {
         this.startTime   = Date.now();
         this.projectName = config.metadata?.projectName ?? 'Project';
+
+        // ── Load active environment from apiEnvironments.json ─────────────────
+        try {
+            const envFile = path.join(process.cwd(), 'data', 'api', 'apiEnvironments.json');
+            if (fs.existsSync(envFile)) {
+                const envData = JSON.parse(fs.readFileSync(envFile, 'utf-8'));
+                if (Array.isArray(envData)) {
+                    // Array format: [{ name, baseUrl, active? }]
+                    const active = envData.find((e: any) => e.active === true) ?? envData[0];
+                    if (active) this.envInfo = {
+                        name: active.name ?? active.environment ?? 'Unknown',
+                    };
+                } else {
+                    // Keyed object format: { "QA": { apiBaseUrl: "..." }, "PROD": { ... } }
+                    const firstName = Object.keys(envData)[0];
+                    if (firstName) {
+                        this.envInfo = { name: firstName };
+                    }
+                }
+            }
+        } catch {
+            // Non-fatal — env bar simply won't render
+        }
     }
 
     onTestEnd(test: TestCase, result: TestResult): void {
@@ -136,32 +183,106 @@ class CustomHTMLReporter implements Reporter {
 
         if (!this.uiResults.has(rowKey)) {
             this.uiResults.set(rowKey, {
-                kind:        'ui',
-                title:       displayTitle,
+                kind:          'ui',
+                title:         displayTitle,
                 tcId,
-                priority:    getMeta('Priority'),
-                testType:    getMeta('TestType'),
-                environment: getMeta('Environment'),
-                userRole:    getMeta('UserRole'),
-                tags:        getMeta('Tags'),
-                browsers:    { chromium: '-', firefox: '-', webkit: '-' },
-                error:       '',
-                isFlaky:     false,
-                trace:       '',
+                priority:      getMeta('Priority'),
+                testType:      getMeta('TestType'),
+                environment:   getMeta('Environment'),
+                userRole:      getMeta('UserRole'),
+                tags:          getMeta('Tags'),
+                browsers:      { chromium: '-', firefox: '-', webkit: '-' },
+                duration:      { chromium: 0,   firefox: 0,   webkit: 0   },
+                errorSummary:  '',
+                errorExpected: '',
+                errorReceived: '',
+                isFlaky:       false,
+                screenshotPath: '',
+                failedSteps:    [],
             });
         }
 
         const entry         = this.uiResults.get(rowKey)!;
         const isWorkerError = (result.error?.message ?? '').includes('found in the worker process');
 
+        // Strip ANSI terminal colour codes
+        const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+        // Parse Playwright error into three structured fields
+        const parseError = (msg: string): { summary: string; expected: string; received: string } => {
+            const text  = stripAnsi(msg);
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            const first = lines[0] ?? 'Test failed';
+
+            // Shorten verbose expect() to readable assertion name
+            const summary = first
+                .replace(/Error: expect\([^)]+\)\.(\w+)\([^)]*\) failed/, 'expect.$1() failed')
+                .replace(/Error: expect\([^)]+\)\.(\w+)\([^)]*\)/,        'expect.$1() failed')
+                .replace(/Error: page\.(\w+):.+?(\d+ms).*/,               'page.$1() timed out after $2')
+                .replace(/^Error: /,                                        '');
+
+            // Extract Expected / Received values — strip label prefix and surrounding quotes
+            const expLine = lines.find(l => /^Expected/.test(l));
+            const recLine = lines.find(l => /^Received/.test(l));
+            const stripQuotes = (s: string) => s.replace(/^["']|["']$/g, '').trim();
+            const expected = expLine ? stripQuotes(expLine.replace(/^Expected\s*[:\w]*\s*:?\s*/, '').trim()) : '';
+            const received = recLine ? stripQuotes(recLine.replace(/^Received\s*[:\w]*\s*:?\s*/, '').trim()) : '';
+
+            return { summary, expected, received };
+        };
+
         if (isBrowserMismatch || isWorkerError || result.status === 'skipped') {
             entry.browsers[browserKey] = isBrowserMismatch ? '-' : 'skipped';
         } else {
             entry.browsers[browserKey] = result.status as BrowserStatus;
-            if (result.status === 'failed') {
-                if (!entry.error) entry.error = result.error?.message?.split('\n')[0] ?? 'Test failed';
-                const tracePath = result.attachments.find(a => a.name === 'trace')?.path;
-                if (tracePath) entry.trace = tracePath;
+            if (result.duration > 0) entry.duration[browserKey] = result.duration;
+            if (result.status === 'failed' && !entry.errorSummary) {
+                const parsed = parseError(result.error?.message ?? 'Test failed');
+                entry.errorSummary  = parsed.summary;
+                entry.errorExpected = parsed.expected;
+                entry.errorReceived = parsed.received;
+
+                // ── Screenshot: grab first screenshot attachment ──────────────
+                if (!entry.screenshotPath) {
+                    const shot = result.attachments.find(
+                        a => a.name === 'screenshot' && a.path && a.contentType === 'image/png'
+                    );
+                    // Store src path AND browser key so onEnd can build a unique dest filename
+                    if (shot?.path) entry.screenshotPath = shot.path + '|' + browserKey;
+                }
+
+                // ── Failed steps: walk result.steps recursively ───────────────
+                if (entry.failedSteps.length === 0) {
+                    const collectFailed = (steps: typeof result.steps): void => {
+                        for (const step of steps) {
+                            if (step.error) {
+                                const stripped = stripAnsi(step.error.message ?? '');
+                                // Shorten absolute file path to project-relative breadcrumb
+                                // e.g. /Users/x/LearnPlaywright/tests/ui/login.test.ts:42 → tests › ui › login.test.ts : 42
+                                const loc      = step.error.location;
+                                let filePath   = '';
+                                let lineNum    = 0;
+                                if (loc?.file) {
+                                    const cwd      = process.cwd().replace(/\\/g, '/');
+                                    const absFile  = loc.file.replace(/\\/g, '/');
+                                    const rel      = absFile.startsWith(cwd)
+                                        ? absFile.slice(cwd.length).replace(/^\//, '')
+                                        : absFile;
+                                    filePath = rel;
+                                    lineNum  = loc.line ?? 0;
+                                }
+                                entry.failedSteps.push({
+                                    title:    step.title,
+                                    error:    stripped.split('\n')[0] ?? stripped,
+                                    file:     filePath,
+                                    line:     lineNum,
+                                });
+                            }
+                            if (step.steps?.length) collectFailed(step.steps);
+                        }
+                    };
+                    collectFailed(result.steps);
+                }
             }
         }
         if (test.outcome() === 'flaky') entry.isFlaky = true;
@@ -184,6 +305,10 @@ class CustomHTMLReporter implements Reporter {
         // Extract priority from tags if present (e.g. @P1)
         const prioMatch  = tags.match(/@(P[0-3])/i);
         const priority   = prioMatch ? prioMatch[1].toUpperCase() : 'N/A';
+
+        // Test type from annotation (e.g. @type.description = "REST")
+        const getMeta    = (type: string) => test.annotations.find(a => a.type === type)?.description ?? 'N/A';
+        const testType   = getMeta('TestType') !== 'N/A' ? getMeta('TestType') : 'API';
 
         // Parse assertion counts from stdout: "[apiTest:assertions] FLOW-01 7/8"
         let assertionsPassed = 0;
@@ -231,6 +356,7 @@ class CustomHTMLReporter implements Reporter {
                 kind:             'api',
                 title,
                 flowId,
+                testType,
                 tags,
                 priority,
                 status,
@@ -275,6 +401,38 @@ class CustomHTMLReporter implements Reporter {
         const fileName  = `${this.projectName}-${timestamp}.html`;
         const filePath  = path.join(reportDir, fileName);
 
+        // ── Screenshot data folder ────────────────────────────────────────────
+        // Mirrors playwright-report/data/ but scoped per run timestamp so
+        // multiple runs don't overwrite each other's screenshots.
+        // Path is relative to the HTML report file: data/<timestamp>/
+        this.screenshotDir = path.join(reportDir, 'data', timestamp);
+        if (!fs.existsSync(this.screenshotDir)) {
+            fs.mkdirSync(this.screenshotDir, { recursive: true });
+        }
+
+        // Copy failure screenshots into the data folder and update entry paths
+        for (const entry of this.uiResults.values()) {
+            if (entry.screenshotPath) {
+                // screenshotPath stored as "absPath|browserKey" to build unique dest name
+                const [srcPath, browserKey] = entry.screenshotPath.split('|');
+                if (srcPath && fs.existsSync(srcPath)) {
+                    // Use tcId + browser as filename to avoid collisions when multiple
+                    // tests fail and Playwright gives them all 'test-failed-1.png'
+                    const safeName = entry.tcId.replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
+                    const destName = `${safeName}-${browserKey ?? 'unknown'}.png`;
+                    const destPath = path.join(this.screenshotDir, destName);
+                    try {
+                        fs.copyFileSync(srcPath, destPath);
+                        entry.screenshotPath = path.join('data', timestamp, destName);
+                    } catch {
+                        entry.screenshotPath = '';
+                    }
+                } else {
+                    entry.screenshotPath = '';
+                }
+            }
+        }
+
         const date     = `${day}/${month}/${year}`;
         const startStr = `${hours}:${minutes}`;
         const duration = ((Date.now() - this.startTime) / 1000).toFixed(2);
@@ -290,6 +448,9 @@ class CustomHTMLReporter implements Reporter {
         const apiTests = Array.from(this.apiResults.values());
         const hasUi    = uiTests.length > 0;
         const hasApi   = apiTests.length > 0;
+
+        // UI environment — first non-N/A Environment annotation across UI tests
+        const uiEnvName = uiTests.map(t => t.environment).find(e => e && e !== 'N/A') ?? null;
 
         // ── Overall KPIs ──────────────────────────────────────────────────────
         const allTotal   = uiTests.length + apiTests.length;
@@ -413,6 +574,57 @@ class CustomHTMLReporter implements Reporter {
         const uiRows  = uiTests.map(r  => this.buildUiRow(r)).join('');
         const apiRows = apiTests.map(r => this.buildApiRow(r)).join('');
 
+        // ── Defect categories ─────────────────────────────────────────────────
+        const defectBuckets: Record<string, number> = {};
+        uiTests.forEach(t => {
+            if (Object.values(t.browsers).includes('failed')) {
+                const cat = classifyDefect(t.errorSummary);
+                defectBuckets[cat] = (defectBuckets[cat] ?? 0) + 1;
+            }
+        });
+        apiTests.forEach(t => {
+            if (t.status === 'failed') {
+                const cat = classifyDefect(t.error);
+                defectBuckets[cat] = (defectBuckets[cat] ?? 0) + 1;
+            }
+        });
+        const totalDefects = Object.values(defectBuckets).reduce((s, v) => s + v, 0);
+
+        const catIcon: Record<string, string> = {
+            'Assertion Error':   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+            'Wrong Status Code': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>',
+            'Timeout / Network': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+            'Element Not Found': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
+            'Schema Violation':  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>',
+            'Auth Failure':      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>',
+            'Other Failure':     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>',
+            'Unknown':           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+        };
+
+        const defectPanelHtml = totalDefects === 0 ? '' : (() => {
+            const sorted = Object.entries(defectBuckets).sort((a, b) => b[1] - a[1]);
+            const cards  = sorted.map(([cat, count]) => {
+                const pct  = Math.round((count / totalDefects) * 100);
+                const icon = catIcon[cat] ?? catIcon['Other Failure'];
+                return '<div class="defect-card">'
+                    + '<div class="defect-icon">' + icon + '</div>'
+                    + '<div class="defect-body">'
+                    + '<div class="defect-name">' + h(cat) + '</div>'
+                    + '<div class="defect-bar-wrap"><div class="defect-bar" style="width:' + pct + '%"></div></div>'
+                    + '</div>'
+                    + '<div class="defect-count">' + count + '</div>'
+                    + '</div>';
+            }).join('');
+            return '<div class="defect-panel" style="animation:fadeUp .4s .1s ease both;">'
+                + '<div class="defect-panel-header">'
+                + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
+                + '<span>Defect Categories</span>'
+                + '<span class="defect-total-badge">' + totalDefects + ' failure' + (totalDefects !== 1 ? 's' : '') + '</span>'
+                + '</div>'
+                + '<div class="defect-cards">' + cards + '</div>'
+                + '</div>';
+        })();
+
         const showBoth = hasUi && hasApi;
 
         return [
@@ -423,7 +635,7 @@ class CustomHTMLReporter implements Reporter {
             '<meta name="viewport" content="width=device-width,initial-scale=1.0">',
             '<title>' + h(this.projectName) + ' \u2014 Test Report</title>',
             '<link rel="preconnect" href="https://fonts.googleapis.com">',
-            '<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Playfair+Display:wght@700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">',
+            '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">',
             '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>',
             this.buildCSS(),
             '</head>',
@@ -449,7 +661,32 @@ class CustomHTMLReporter implements Reporter {
             '</div>',
             '</div>',
 
-            // ── Shell ─────────────────────────────────────────────────────────
+            // ── Environment Info Bar — single line, UI + API ──────────────────
+            (hasUi && uiEnvName || hasApi && this.envInfo) ? '<div class="env-bar">'
+                + '<div class="env-bar-inner">'
+                // UI segment
+                + (hasUi && uiEnvName
+                    ? '<span class="env-layer-badge env-layer-ui">UI</span>'
+                    + '<div class="env-item">'
+                    + '<svg class="env-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>'
+                    + '<span class="env-item-label">Environment</span>'
+                    + '<span class="env-item-value env-name-badge">' + h(uiEnvName) + '</span>'
+                    + '</div>'
+                    : '')
+                // Divider between segments
+                + (hasUi && uiEnvName && hasApi && this.envInfo ? '<span class="env-divider"></span>' : '')
+                // API segment
+                + (hasApi && this.envInfo
+                    ? '<span class="env-layer-badge env-layer-api">API</span>'
+                    + '<div class="env-item">'
+                    + '<svg class="env-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>'
+                    + '<span class="env-item-label">Environment</span>'
+                    + '<span class="env-item-value env-name-badge">' + h(this.envInfo.name) + '</span>'
+                    + '</div>'
+                    : '')
+                + '</div>'
+                + '</div>'
+            : '',
             '<div class="shell">',
 
             // Page header
@@ -473,7 +710,8 @@ class CustomHTMLReporter implements Reporter {
             this.kpi('Flaky',     allFlaky,   'flaky', allFlaky > 0 ? 'intermittent' : 'stable'),
             '</div>',
 
-            // ── Tab switcher (only when both layers present) ──────────────────
+            // ── Defect Categories (only when failures exist) ──────────────────
+            defectPanelHtml,
             showBoth ? [
                 '<div class="tab-bar" style="animation:fadeUp .4s .12s ease both;">',
                 '<button class="tab active" data-tab="all"  onclick="switchTab(this)">All Results <span class="tab-count">' + allTotal + '</span></button>',
@@ -568,7 +806,7 @@ class CustomHTMLReporter implements Reporter {
 
             // ── Scripts ───────────────────────────────────────────────────────
             '<script>',
-            'Chart.defaults.font.family="\'DM Sans\',system-ui,sans-serif";',
+            'Chart.defaults.font.family="\'Inter\',system-ui,sans-serif";',
             'Chart.defaults.font.size=11;',
             'Chart.defaults.color="#6B7280";',
 
@@ -622,9 +860,26 @@ class CustomHTMLReporter implements Reporter {
             'var matchS=f==="all"||status===f;',
             'var show=matchQ&&matchS;',
             'row.style.display=show?"":"none";',
+            // Sync expand row visibility with parent: hidden when parent hidden,
+            // restored to open/closed state when parent shown
+            'var expandId=row.getAttribute("data-expand-id");',
+            'if(expandId){',
+            'var er=document.getElementById(expandId);',
+            'if(er){',
+            'if(!show){er.style.display="none";}',
+            'else{var isOpen=row.classList.contains("row-expanded");er.style.display=isOpen?"table-row":"none";}',
+            '}}',
             'if(show)visible++;});',
             'var es=document.getElementById("empty-"+scope);',
             'if(es)es.style.display=visible===0?"flex":"none";}',
+
+            // Expand / collapse detail panel for failed UI rows
+            'function toggleExpand(id,row){',
+            'var panel=document.getElementById(id);',
+            'if(!panel)return;',
+            'var open=panel.style.display!=="none"&&panel.style.display!=="";',
+            'panel.style.display=open?"none":"table-row";',
+            'row.classList.toggle("row-expanded",!open);}',
             '</script>',
 
             '</body></html>',
@@ -647,26 +902,24 @@ class CustomHTMLReporter implements Reporter {
         const searchId = scope === 'ui' ? 'searchUI' : 'searchAPI';
 
         const tableHeader = hasUiBrowserCols ? [
-            '<th style="width:27%">Test Case</th>',
+            '<th style="width:24%">Test Case</th>',
             '<th style="width:10%">Type</th>',
             '<th style="width:7%">Priority</th>',
-            '<th class="c" style="width:5%">Env</th>',
-            '<th class="c" style="width:7%">Role</th>',
+            '<th class="c" style="width:6%">Role</th>',
             '<th class="c" style="width:7%">Chromium</th>',
             '<th class="c" style="width:7%">Firefox</th>',
             '<th class="c" style="width:6%">Webkit</th>',
-            '<th class="c" style="width:8%">Status</th>',
-            '<th style="width:11%">Error</th>',
-            '<th class="c" style="width:7%">Trace</th>',
+            '<th class="c" style="width:7%">Status</th>',
+            '<th class="c" style="width:7%" title="Maximum duration across all browsers for this test">Duration ⓘ</th>',
+            '<th style="width:19%">Error / Expected vs Received</th>',
         ].join('') : [
-            '<th style="width:13%">Flow ID</th>',
-            '<th style="width:27%">Description</th>',
+            '<th style="width:28%">Test Case</th>',
+            '<th style="width:9%">Type</th>',
             '<th style="width:8%">Priority</th>',
-            '<th style="width:10%">Tags</th>',
             '<th class="c" style="width:8%">Duration</th>',
             '<th class="c" style="width:9%">Assertions</th>',
             '<th class="c" style="width:7%">Status</th>',
-            '<th style="width:18%">Error</th>',
+            '<th style="width:31%">Error</th>',
         ].join('');
 
         return [
@@ -709,12 +962,6 @@ class CustomHTMLReporter implements Reporter {
         const hasFail = active.includes('failed');
         const hasPass = active.includes('passed');
 
-        let statusHtml: string, dataStatus: string;
-        if      (hasFail)                          { statusHtml = '<span class="st st-fail"><span class="sd"></span>Fail</span>'; dataStatus = 'fail'; }
-        else if (hasPass)                          { statusHtml = '<span class="st st-pass"><span class="sd"></span>Pass</span>'; dataStatus = 'pass'; }
-        else if (active.some(s => s === 'skipped')){ statusHtml = '<span class="st st-skip"><span class="sd"></span>Skip</span>'; dataStatus = 'skip'; }
-        else                                       { statusHtml = '<span class="st st-na"><span class="sd"></span>N/A</span>';    dataStatus = 'na'; }
-
         const flakySearch = r.isFlaky ? ' flaky' : '';
         const flakyBadge  = r.isFlaky ? '<span class="badge badge-flaky">Flaky</span>' : '';
         const tagsSearch  = r.tags !== 'N/A' ? r.tags.replace(/@/g, '').replace(/,/g, ' ') : '';
@@ -722,28 +969,143 @@ class CustomHTMLReporter implements Reporter {
             ? r.tags.split(',').map(t => { const c = t.trim(); return c ? '<span class="tag">' + h(c) + '</span>' : ''; }).join('')
             : '';
 
-        const prioClass = 'badge-' + (r.priority ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const bCells    = (['chromium', 'firefox', 'webkit'] as BrowserKey[])
-            .map(b => '<td class="c">' + this.icon(r.browsers[b]) + '</td>').join('');
+        const prioClass    = 'badge-' + (r.priority ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const browserNames: Record<BrowserKey, string> = { chromium: 'Chromium', firefox: 'Firefox', webkit: 'WebKit' };
+        const bCells       = (['chromium', 'firefox', 'webkit'] as BrowserKey[])
+            .map(b => {
+                const s     = r.browsers[b];
+                const label = browserNames[b];
+                const tip   = s === 'passed'  ? `title="Passed on ${label}"`
+                            : s === 'failed'  ? `title="Failed on ${label}"`
+                            : s === 'skipped' ? `title="Skipped on ${label}"`
+                            : '';
+                return '<td class="c">' + this.iconTipped(s, tip) + '</td>';
+            }).join('');
+
+        // Which browsers actually ran (not '-')
+        const ranBrowsers    = (['chromium', 'firefox', 'webkit'] as BrowserKey[]).filter(b => r.browsers[b] !== '-');
+        const failedBrowsers = ranBrowsers.filter(b => r.browsers[b] === 'failed').map(b => browserNames[b]);
+        const ranCount       = ranBrowsers.length;
+
+        // Status badge — append scope note when failure is browser-specific
+        let statusHtml: string, dataStatus: string;
+        if (hasFail) {
+            dataStatus  = 'fail';
+            const scope = (ranCount === 1 && failedBrowsers.length === 1)
+                ? ' <span class="browser-scope">' + failedBrowsers[0] + ' only</span>'
+                : failedBrowsers.length < ranCount
+                    ? ' <span class="browser-scope">' + failedBrowsers.join(', ') + '</span>'
+                    : '';
+            statusHtml  = '<span class="st st-fail"><span class="sd"></span>Fail</span>' + scope;
+        } else if (hasPass) {
+            statusHtml = '<span class="st st-pass"><span class="sd"></span>Pass</span>'; dataStatus = 'pass';
+        } else if (active.some(s => s === 'skipped')) {
+            statusHtml = '<span class="st st-skip"><span class="sd"></span>Skip</span>'; dataStatus = 'skip';
+        } else {
+            statusHtml = '<span class="st st-na"><span class="sd"></span>N/A</span>';    dataStatus = 'na';
+        }
+
+        // Max duration across browsers that actually ran
+        const maxDur = Math.max(
+            ...(['chromium', 'firefox', 'webkit'] as BrowserKey[])
+                .filter(b => r.duration[b] > 0)
+                .map(b => r.duration[b])
+        );
+        let durClass = 'dur-fast';
+        if      (maxDur >= 10000) durClass = 'dur-slow';
+        else if (maxDur >= 5000)  durClass = 'dur-ok';
+        const durLabel = maxDur > 0
+            ? '<span class="mono-label ' + durClass + '">' + (maxDur >= 1000 ? (maxDur / 1000).toFixed(1) + 's' : maxDur + 'ms') + '</span>'
+            : '<span class="na-dash">\u2014</span>';
+
+        // Error cell — assertion name + Expected / Received stacked
+        let errorHtml = '';
+        if (r.errorSummary) {
+            errorHtml = '<div class="err-block">';
+            errorHtml += '<div class="err-summary">' + h(r.errorSummary) + '</div>';
+            if (r.errorExpected || r.errorReceived) {
+                errorHtml += '<div class="err-diff">';
+                if (r.errorExpected) errorHtml += '<div class="err-row"><span class="err-label exp">Expected</span><span class="err-val exp-val">' + h(r.errorExpected) + '</span></div>';
+                if (r.errorReceived) errorHtml += '<div class="err-row"><span class="err-label rec">Received</span><span class="err-val rec-val">' + h(r.errorReceived) + '</span></div>';
+                errorHtml += '</div>';
+            }
+            errorHtml += '</div>';
+        }
 
         const searchStr = [r.tcId, r.title, tagsSearch, r.tags, r.testType, r.priority, r.environment, r.userRole, dataStatus, flakySearch].join(' ');
 
-        return [
-            '<tr class="test-row row-ui" data-search="' + h(searchStr) + '" data-status="' + dataStatus + '">',
+        const colCount = 10; // total <td> columns in UI table
+        const rowId    = 'expand-' + r.tcId.replace(/[^a-z0-9]/gi, '-');
+        const isExpandable = hasFail;
+
+        // Main row — clicking anywhere on a failed row toggles the detail panel
+        const mainRow = [
+            '<tr class="test-row row-ui' + (isExpandable ? ' row-expandable' : '') + '"'
+                + ' data-search="' + h(searchStr) + '"'
+                + ' data-status="' + dataStatus + '"'
+                + (isExpandable ? ' data-expand-id="' + rowId + '"' : '')
+                + (isExpandable ? ' onclick="toggleExpand(\'' + rowId + '\',this)"' : '') + '>',
             '<td><div class="tc-id">' + h(r.tcId) + (flakyBadge ? ' ' + flakyBadge : '') + '</div>',
             '<div class="tc-title">' + h(r.title) + '</div>',
             tagPills ? '<div class="tc-tags">' + tagPills + '</div>' : '',
             '</td>',
             '<td><span class="badge badge-type">' + h(r.testType) + '</span></td>',
             '<td><span class="badge ' + prioClass + '">' + h(r.priority) + '</span></td>',
-            '<td class="c"><span class="mono-label">' + h(r.environment) + '</span></td>',
             '<td class="c"><span class="mono-label">' + h(r.userRole) + '</span></td>',
             bCells,
             '<td class="c">' + statusHtml + '</td>',
-            '<td>' + (r.error ? '<span class="err-msg">' + h(r.error) + '</span>' : '') + '</td>',
-            '<td class="c">' + (r.trace ? '<a href="' + h(r.trace) + '" target="_blank" class="trace-link"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Trace</a>' : '<span class="na-dash">\u2014</span>') + '</td>',
+            '<td class="c">' + durLabel + '</td>',
+            '<td>' + errorHtml + (isExpandable ? '<span class="expand-hint">Click row to expand ▾</span>' : '') + '</td>',
             '</tr>',
         ].join('');
+
+        if (!isExpandable) return mainRow;
+
+        // ── Detail panel row ─────────────────────────────────────────────────
+        let detailHtml = '<div class="expand-panel">';
+
+        // Failed steps log
+        if (r.failedSteps.length > 0) {
+            detailHtml += '<div class="expand-section">';
+            detailHtml += '<div class="expand-section-title"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Failed Steps</div>';
+            detailHtml += '<div class="expand-steps">';
+            for (const step of r.failedSteps) {
+                // Build breadcrumb from file path: "tests/ui/login.test.ts" → "tests › ui › login.test.ts"
+                const breadcrumb = step.file
+                    ? step.file.replace(/\\/g, '/').split('/').join(' › ')
+                    : '';
+                const lineLabel = step.line ? ' : ' + step.line : '';
+
+                detailHtml += '<div class="expand-step">';
+                detailHtml += '<span class="expand-step-icon">✕</span>';
+                detailHtml += '<div class="expand-step-body">';
+                detailHtml += '<div class="expand-step-title">' + h(step.title) + '</div>';
+                if (step.error) detailHtml += '<div class="expand-step-error">' + h(step.error) + '</div>';
+                if (breadcrumb) detailHtml += '<div class="expand-step-loc"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span class="expand-step-loc-path">' + h(breadcrumb) + '</span>' + (lineLabel ? '<span class="expand-step-loc-line">' + h(lineLabel) + '</span>' : '') + '</div>';
+                detailHtml += '</div></div>';
+            }
+            detailHtml += '</div></div>';
+        }
+
+        // Screenshot
+        if (r.screenshotPath) {
+            detailHtml += '<div class="expand-section">';
+            detailHtml += '<div class="expand-section-title"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> Screenshot</div>';
+            detailHtml += '<div class="expand-screenshot-wrap">';
+            detailHtml += '<img class="expand-screenshot" src="' + h(r.screenshotPath) + '" alt="Failure screenshot" onclick="this.classList.toggle(\'zoomed\')" title="Click to zoom">';
+            detailHtml += '</div></div>';
+        }
+
+        detailHtml += '</div>';
+
+        const detailRow = [
+            '<tr class="expand-row" id="' + rowId + '" style="display:none;">',
+            '<td colspan="' + colCount + '" class="expand-td">',
+            detailHtml,
+            '</td></tr>',
+        ].join('');
+
+        return mainRow + detailRow;
     }
 
     // ── API row ───────────────────────────────────────────────────────────────
@@ -757,31 +1119,41 @@ class CustomHTMLReporter implements Reporter {
         const flakyBadge = r.isFlaky ? '<span class="badge badge-flaky">Flaky</span>' : '';
         const prioClass  = 'badge-' + (r.priority ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-        // Duration color
+        // Duration colour
         let durClass = 'dur-fast';
         if      (r.duration >= 1000) durClass = 'dur-slow';
         else if (r.duration >= 500)  durClass = 'dur-ok';
 
-        // Assertion count pill: "7 / 8" — red if any failed, green if all passed
+        const durMs = r.duration >= 1000
+            ? (r.duration / 1000).toFixed(1) + 's'
+            : r.duration + 'ms';
+
+        // Assertion pill
         const assertHtml = r.assertionsTotal > 0
             ? '<span class="assert-pill assert-pill-' + (r.assertionsPassed === r.assertionsTotal ? 'pass' : 'fail') + '">'
               + r.assertionsPassed + ' / ' + r.assertionsTotal + '</span>'
             : '<span class="na-dash">\u2014</span>';
 
+        // Tags — filter out priority tags, render as pills (same as UI)
         const tagPills = r.tags
-            ? r.tags.split(/\s+/).filter(t => t.startsWith('@') && !t.match(/@P[0-3]/i))
+            ? r.tags.split(/\s+/)
+                .filter(t => t.startsWith('@') && !t.match(/@P[0-3]/i))
                 .map(t => '<span class="tag">' + h(t) + '</span>').join('')
             : '';
 
-        const searchStr = [r.flowId, r.title, r.tags, r.priority, dataStatus, r.isFlaky ? 'flaky' : ''].join(' ');
+        const searchStr = [r.flowId, r.title, r.tags, r.testType, r.priority, dataStatus, r.isFlaky ? 'flaky' : ''].join(' ');
 
         return [
             '<tr class="test-row row-api" data-search="' + h(searchStr) + '" data-status="' + dataStatus + '">',
-            '<td><div class="tc-id">' + h(r.flowId) + (flakyBadge ? ' ' + flakyBadge : '') + '</div></td>',
-            '<td><div class="tc-title">' + h(r.title) + '</div></td>',
+            // Test Case cell — id + title + tags (mirrors UI)
+            '<td>',
+            '<div class="tc-id">' + h(r.flowId) + (flakyBadge ? ' ' + flakyBadge : '') + '</div>',
+            '<div class="tc-title">' + h(r.title) + '</div>',
+            tagPills ? '<div class="tc-tags">' + tagPills + '</div>' : '',
+            '</td>',
+            '<td><span class="badge badge-type">' + h(r.testType) + '</span></td>',
             '<td><span class="badge ' + prioClass + '">' + h(r.priority) + '</span></td>',
-            '<td>' + (tagPills || '<span class="na-dash">\u2014</span>') + '</td>',
-            '<td class="c"><span class="mono-label ' + durClass + '">' + r.duration + 'ms</span></td>',
+            '<td class="c"><span class="mono-label ' + durClass + '">' + durMs + '</span></td>',
             '<td class="c">' + assertHtml + '</td>',
             '<td class="c">' + statusHtml + '</td>',
             '<td>' + (r.error ? '<span class="err-msg" title="' + h(r.error) + '">' + h(r.error) + '</span>' : '') + '</td>',
@@ -820,11 +1192,16 @@ class CustomHTMLReporter implements Reporter {
     }
 
     private icon(status: BrowserStatus): string {
+        return this.iconTipped(status, '');
+    }
+
+    private iconTipped(status: BrowserStatus, tipAttr: string): string {
+        const tip = tipAttr ? ' ' + tipAttr : '';
         switch (status) {
-            case 'passed':  return '<span class="br br-pass"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>';
-            case 'failed':  return '<span class="br br-fail"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
-            case 'skipped': return '<span class="br br-skip"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></span>';
-            default:        return '<span class="br br-none">\u2014</span>';
+            case 'passed':  return `<span class="br br-pass"${tip}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>`;
+            case 'failed':  return `<span class="br br-fail"${tip}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>`;
+            case 'skipped': return `<span class="br br-skip"${tip}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></span>`;
+            default:        return `<span class="br br-none"${tip}>\u2014</span>`;
         }
     }
 
@@ -834,43 +1211,43 @@ class CustomHTMLReporter implements Reporter {
         return `<style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
-  --white:#FFFFFF;--page-bg:#F4F6F9;--border:#E5E7EB;--border-md:#D1D5DB;
-  --ink:#0F1B35;--ink-2:#1F2937;--ink-3:#6B7280;--ink-4:#9CA3AF;
-  --blue:#2563EB;--blue-lt:#EFF6FF;--blue-bd:#BFDBFE;
-  --pass:#16A34A;--pass-lt:#F0FDF4;--pass-bd:#BBF7D0;
-  --fail:#DC2626;--fail-lt:#FFF5F5;--fail-bd:#FEE2E2;
-  --skip:#2563EB;--skip-lt:#EFF6FF;--skip-bd:#BFDBFE;
-  --warn:#D97706;--warn-lt:#FFFBEB;--warn-bd:#FDE68A;
-  --api:#059669;--api-lt:#ECFDF5;--api-bd:#A7F3D0;
-  --topbar:#0F1B35;
-  --font-ui:'DM Sans',system-ui,sans-serif;
-  --font-mono:'DM Mono','Menlo',monospace;
-  --font-head:'Playfair Display',Georgia,serif;
-  --r:6px;--r-lg:10px;
-  --shadow:0 1px 3px rgba(15,27,53,.07),0 1px 2px rgba(15,27,53,.04);
-  --shadow-md:0 4px 12px rgba(15,27,53,.09),0 2px 4px rgba(15,27,53,.05);
+  --white:#FFFFFF;--page-bg:#F4F4F5;--border:#E8E8EE;--border-md:#D8D8E4;
+  --ink:#1A1A22;--ink-2:#2D2D3A;--ink-3:#6B6B80;--ink-4:#9999B0;
+  --blue:#7B61FF;--blue-lt:#F2EFFF;--blue-bd:#D4CCFF;
+  --pass:#30BF6E;--pass-lt:#EDFAF3;--pass-bd:#B3EECF;
+  --fail:#E6394B;--fail-lt:#FEF0F1;--fail-bd:#FACCD0;
+  --skip:#9747FF;--skip-lt:#F7F0FF;--skip-bd:#DFC2FF;
+  --warn:#FF8800;--warn-lt:#FFF4E6;--warn-bd:#FFD199;
+  --api:#00B4D8;--api-lt:#E6F9FC;--api-bd:#99E5F2;
+  --topbar:#FFFFFF;
+  --font-ui:'Inter',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono','Menlo',monospace;
+  --font-head:'Inter',system-ui,sans-serif;
+  --r:8px;--r-lg:12px;
+  --shadow:0 1px 4px rgba(26,26,34,.06),0 1px 2px rgba(26,26,34,.04);
+  --shadow-md:0 4px 16px rgba(26,26,34,.08),0 2px 4px rgba(26,26,34,.04);
 }
-body{background:var(--page-bg);color:var(--ink-2);font-family:var(--font-ui);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+body{background:var(--page-bg);color:var(--ink-2);font-family:var(--font-ui);font-size:13.5px;line-height:1.5;-webkit-font-smoothing:antialiased;letter-spacing:-.01em;}
 
 /* Topbar */
-.topbar{background:var(--topbar);border-bottom:1px solid rgba(255,255,255,.07);position:sticky;top:0;z-index:100;}
+.topbar{background:var(--topbar);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;box-shadow:0 1px 0 var(--border);}
 .topbar-inner{max-width:1440px;margin:0 auto;padding:0 28px;height:46px;display:flex;align-items:center;justify-content:space-between;}
-.topbar-brand{display:flex;align-items:center;gap:9px;color:#fff;font-size:13px;font-weight:600;}
-.topbar-logo{color:#60A5FA;}
-.topbar-meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:rgba(255,255,255,.4);}
-.topbar-meta strong{color:rgba(255,255,255,.65);font-weight:500;}
-.sep{color:rgba(255,255,255,.18);font-size:14px;}
+.topbar-brand{display:flex;align-items:center;gap:9px;color:var(--ink);font-size:13px;font-weight:600;}
+.topbar-logo{color:var(--blue);}
+.topbar-meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--ink-4);}
+.topbar-meta strong{color:var(--ink-3);font-weight:500;}
+.sep{color:var(--border-md);font-size:14px;}
 .layer-pill{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;}
-.ui-pill{background:rgba(37,99,235,.25);color:#93C5FD;}
-.api-pill{background:rgba(5,150,105,.25);color:#6EE7B7;}
+.ui-pill{background:var(--blue-lt);color:var(--blue);}
+.api-pill{background:var(--api-lt);color:var(--api);}
 
 /* Shell */
 .shell{max-width:1440px;margin:0 auto;padding:32px 28px 56px;}
 
 /* Page header */
 .page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;padding-bottom:22px;border-bottom:2px solid var(--border);}
-.report-eyebrow{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--blue);margin-bottom:5px;}
-.report-title{font-family:var(--font-head);font-size:32px;font-weight:900;color:var(--ink);letter-spacing:-.02em;line-height:1.1;}
+.report-eyebrow{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--blue);margin-bottom:5px;}
+.report-title{font-family:var(--font-head);font-size:28px;font-weight:700;color:var(--ink);letter-spacing:-.02em;line-height:1.2;}
 .status-pill{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;font-size:12.5px;font-weight:600;border:1.5px solid;}
 .status-pill .status-dot{width:7px;height:7px;border-radius:50%;animation:pulse 2.4s ease-in-out infinite;}
 .hl-pass{background:var(--pass-lt);color:var(--pass);border-color:var(--pass-bd);}
@@ -884,13 +1261,13 @@ body{background:var(--page-bg);color:var(--ink-2);font-family:var(--font-ui);fon
 .tab-bar{display:flex;gap:4px;margin-bottom:24px;border-bottom:2px solid var(--border);padding-bottom:0;}
 .tab{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;font-family:var(--font-ui);font-size:13px;font-weight:500;color:var(--ink-3);background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;cursor:pointer;transition:all .15s;}
 .tab:hover{color:var(--ink-2);}
-.tab.active{color:var(--ink);border-bottom-color:var(--ink);font-weight:600;}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600;}
 .tab-count{display:inline-flex;align-items:center;justify-content:center;background:#F1F5F9;border-radius:999px;min-width:20px;height:20px;padding:0 6px;font-size:11px;font-weight:700;color:var(--ink-3);}
-.tab.active .tab-count{background:var(--ink);color:#fff;}
+.tab.active .tab-count{background:var(--blue);color:#fff;}
 
 /* Layer section */
 .layer-section{margin-bottom:40px;}
-.layer-heading{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;padding:10px 14px;background:var(--blue-lt);border:1px solid var(--blue-bd);border-radius:var(--r);border-left:3px solid var(--blue);}
+.layer-heading{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;padding:8px 14px;background:var(--blue-lt);border:1px solid var(--blue-bd);border-radius:var(--r);border-left:3px solid var(--blue);}
 .api-heading{color:var(--api);background:var(--api-lt);border-color:var(--api-bd);border-left-color:var(--api);}
 
 /* KPI */
@@ -911,7 +1288,7 @@ body{background:var(--page-bg);color:var(--ink-2);font-family:var(--font-ui);fon
 .kpi-icon-skip{background:var(--skip-lt);color:var(--skip);}
 .kpi-icon-flaky{background:var(--warn-lt);color:var(--warn);}
 .kpi-body{align-self:end;}
-.kpi-value{font-family:var(--font-head);font-size:34px;font-weight:700;line-height:1;letter-spacing:-.02em;}
+.kpi-value{font-family:var(--font-head);font-size:32px;font-weight:700;line-height:1;letter-spacing:-.03em;}
 .kpi-total .kpi-value{color:var(--ink);}
 .kpi-pass  .kpi-value{color:var(--pass);}
 .kpi-fail  .kpi-value{color:var(--fail);}
@@ -926,7 +1303,7 @@ body{background:var(--page-bg);color:var(--ink-2);font-family:var(--font-ui);fon
 .chart-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);margin-bottom:14px;}
 .chart-wrap{position:relative;height:148px;display:flex;align-items:center;justify-content:center;}
 .donut-center{position:absolute;text-align:center;pointer-events:none;}
-.donut-val{font-family:var(--font-head);font-size:26px;font-weight:700;color:var(--pass);line-height:1;}
+.donut-val{font-family:var(--font-head);font-size:24px;font-weight:700;color:var(--pass);line-height:1;}
 .donut-sub{font-size:9px;font-weight:700;color:var(--ink-4);text-transform:uppercase;letter-spacing:.1em;margin-top:2px;}
 
 /* Section header */
@@ -942,75 +1319,116 @@ body{background:var(--page-bg);color:var(--ink-2);font-family:var(--font-ui);fon
 .search-input{width:100%;background:var(--white);border:1px solid var(--border-md);border-radius:var(--r);padding:9px 12px 9px 34px;font-family:var(--font-ui);font-size:13px;color:var(--ink);outline:none;transition:border-color .15s,box-shadow .15s;}
 .search-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.1);}
 .filter-group{display:flex;gap:5px;flex-shrink:0;}
-.fbtn{display:inline-flex;align-items:center;gap:6px;background:var(--white);border:1px solid var(--border-md);border-radius:var(--r);padding:8px 12px;font-family:var(--font-ui);font-size:12px;font-weight:500;color:var(--ink-3);cursor:pointer;transition:all .15s;white-space:nowrap;}
+.fbtn{display:inline-flex;align-items:center;gap:6px;background:var(--white);border:1px solid var(--border-md);border-radius:var(--r);padding:7px 12px;font-family:var(--font-ui);font-size:12px;font-weight:500;color:var(--ink-3);cursor:pointer;transition:all .15s;white-space:nowrap;}
 .fbtn:hover{background:var(--page-bg);color:var(--ink-2);}
-.fbtn.active{background:var(--ink);border-color:var(--ink);color:#fff;}
+.fbtn.active{background:var(--blue);border-color:var(--blue);color:#fff;}
 .fbtn-pass.active{background:var(--pass);border-color:var(--pass);}
 .fbtn-fail.active{background:var(--fail);border-color:var(--fail);}
 .fbtn-skip.active{background:var(--skip);border-color:var(--skip);}
 .fbtn-flaky.active{background:var(--warn);border-color:var(--warn);}
 .fbtn-count{display:inline-flex;align-items:center;justify-content:center;background:rgba(0,0,0,.07);border-radius:999px;min-width:18px;height:18px;padding:0 5px;font-size:10px;font-weight:700;}
-.fbtn.active .fbtn-count{background:rgba(255,255,255,.22);}
+.fbtn.active .fbtn-count{background:rgba(255,255,255,.25);}
 
 /* Table */
 .table-card{background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow);}
 table{width:100%;border-collapse:collapse;table-layout:fixed;}
-thead tr{border-bottom:2px solid var(--border);}
-th{padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);text-align:left;background:#FAFBFC;}
+thead tr{border-bottom:1px solid var(--border);}
+th{padding:10px 14px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-4);text-align:left;background:#F8F8FB;}
 th.c{text-align:center;}
 tbody tr{border-bottom:1px solid var(--border);transition:background .12s;}
 tbody tr:last-child{border-bottom:none;}
-tbody tr:hover{background:#F8FAFF;}
-td{padding:12px 14px;vertical-align:middle;font-size:12.5px;color:var(--ink-2);}
+tbody tr:hover{background:#F8F7FF;}
+td{padding:12px 14px;vertical-align:middle;font-size:13px;color:var(--ink-2);}
 td.c{text-align:center;}
 .tc-id{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--ink);display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
 .tc-title{color:var(--ink-3);font-size:11.5px;margin-top:3px;line-height:1.4;}
 .tc-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
-.tag{font-size:10px;padding:2px 9px;border-radius:999px;background:var(--blue-lt);color:var(--blue);font-weight:500;border:1px solid var(--blue-bd);}
+.tag{font-size:11px;padding:2px 9px;border-radius:999px;background:var(--blue-lt);color:var(--blue);font-weight:500;border:1px solid var(--blue-bd);}
 
 /* Badges */
-.badge{display:inline-block;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;}
-.badge-type{background:#F1F5F9;color:#475569;border:1px solid #E2E8F0;}
+.badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:500;white-space:nowrap;}
+.badge-type{background:#F5F5FA;color:#5C5C80;border:1px solid #E4E4F0;}
 .badge-flaky{background:var(--warn-lt);color:var(--warn);border:1px solid var(--warn-bd);}
 .badge-p0{background:var(--fail-lt);color:var(--fail);border:1px solid var(--fail-bd);}
 .badge-p1{background:var(--warn-lt);color:var(--warn);border:1px solid var(--warn-bd);}
 .badge-p2{background:var(--blue-lt);color:var(--blue);border:1px solid var(--blue-bd);}
-.badge-p3{background:#F9FAFB;color:var(--ink-3);border:1px solid var(--border);}
-.badge-na,.badge-unknown{background:#F9FAFB;color:var(--ink-4);border:1px solid var(--border);}
+.badge-p3{background:#F5F5FA;color:var(--ink-3);border:1px solid var(--border);}
+.badge-na,.badge-unknown{background:#F5F5FA;color:var(--ink-4);border:1px solid var(--border);}
 .mono-label{font-family:var(--font-mono);font-size:11px;color:var(--ink-3);}
 .dur-fast{color:var(--pass);}
 .dur-ok{color:var(--warn);}
 .dur-slow{color:var(--fail);}
-.assert-pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;}
-.assert-pill-pass{background:#D1FAE5;color:#065F46;}
-.assert-pill-fail{background:#FEE2E2;color:#991B1B;}
+.assert-pill{display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;}
+.assert-pill-pass{background:var(--pass-lt);color:#1A7A42;border:1px solid var(--pass-bd);}
+.assert-pill-fail{background:var(--fail-lt);color:var(--fail);border:1px solid var(--fail-bd);}
 
 /* Browser icon */
-.br{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:5px;border:1px solid;}
+.br{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;border:1px solid;}
 .br-pass{background:var(--pass-lt);border-color:var(--pass-bd);color:var(--pass);}
 .br-fail{background:var(--fail-lt);border-color:var(--fail-bd);color:var(--fail);}
 .br-skip{background:var(--skip-lt);border-color:var(--skip-bd);color:var(--skip);}
 .br-none{color:var(--ink-4);font-size:13px;border:none;background:none;}
+.br[title],.br-pass[title],.br-fail[title],.br-skip[title],.br-none[title]{cursor:help;}
+.browser-scope{font-size:9.5px;font-weight:600;color:var(--fail);background:var(--fail-lt);border:1px solid var(--fail-bd);border-radius:4px;padding:1px 5px;white-space:nowrap;vertical-align:middle;margin-left:3px;}
 
 /* Status pill */
-.st{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;border:1px solid;}
+.st{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:10.5px;font-weight:600;white-space:nowrap;border:1px solid;}
 .sd{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
-.st-pass{background:var(--pass-lt);color:var(--pass);border-color:var(--pass-bd);}
+.st-pass{background:var(--pass-lt);color:#1A7A42;border-color:var(--pass-bd);}
 .st-pass .sd{background:var(--pass);}
 .st-fail{background:var(--fail-lt);color:var(--fail);border-color:var(--fail-bd);}
 .st-fail .sd{background:var(--fail);}
 .st-skip{background:var(--skip-lt);color:var(--skip);border-color:var(--skip-bd);}
 .st-skip .sd{background:var(--skip);}
-.st-na{background:#F9FAFB;color:var(--ink-4);border-color:var(--border);}
+.st-na{background:#F5F5FA;color:var(--ink-4);border-color:var(--border);}
 .st-na .sd{background:var(--ink-4);}
 
 /* Error & misc */
-.err-msg{display:block;font-family:var(--font-mono);font-size:10.5px;color:var(--fail);background:var(--fail-lt);padding:4px 8px;border-radius:4px;border-left:2.5px solid var(--fail);line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help;}
-.trace-link{display:inline-flex;align-items:center;gap:4px;color:var(--blue);font-size:11px;font-weight:600;text-decoration:none;}
-.trace-link:hover{color:#1D4ED8;text-decoration:underline;}
+.err-msg{display:block;font-family:var(--font-mono);font-size:10.5px;color:var(--fail);background:var(--fail-lt);padding:4px 8px;border-radius:6px;border-left:2.5px solid var(--fail);line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help;}
+.err-block{display:flex;flex-direction:column;gap:4px;}
+.err-summary{font-family:var(--font-mono);font-size:10.5px;color:var(--fail);background:var(--fail-lt);padding:3px 7px;border-radius:6px;border-left:2.5px solid var(--fail);line-height:1.5;word-break:break-word;}
+.err-diff{display:flex;flex-direction:column;gap:2px;margin-top:1px;}
+.err-row{display:flex;align-items:baseline;gap:5px;}
+.err-label{font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:4px;white-space:nowrap;flex-shrink:0;}
+.err-label.exp{background:var(--pass-lt);color:#1A7A42;}
+.err-label.rec{background:var(--fail-lt);color:var(--fail);}
+.err-val{font-family:var(--font-mono);font-size:10.5px;word-break:break-all;line-height:1.4;}
+.exp-val{color:#1A7A42;}
+.rec-val{color:var(--fail);}
+th[title]{cursor:help;border-bottom:1px dashed var(--ink-4);}
+
 .na-dash{color:var(--ink-4);}
 .empty-state{display:none;flex-direction:column;align-items:center;gap:10px;padding:52px 24px;color:var(--ink-4);font-size:13px;}
 .page-footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:11px;color:var(--ink-4);}
+
+/* ── Environment Info Bar ─────────────────────────────────────────────────── */
+.env-bar{background:var(--white);border-bottom:1px solid var(--border);}
+.env-bar-inner{max-width:1440px;margin:0 auto;padding:0 28px;height:34px;display:flex;align-items:center;gap:10px;}
+.env-layer-badge{display:inline-flex;align-items:center;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;flex-shrink:0;}
+.env-layer-ui{background:var(--blue-lt);color:var(--blue);border:1px solid var(--blue-bd);}
+.env-layer-api{background:var(--api-lt);color:var(--api);border:1px solid var(--api-bd);}
+.env-divider{width:1px;height:18px;background:var(--border-md);margin:0 6px;flex-shrink:0;}
+.env-item{display:flex;align-items:center;gap:5px;}
+.env-item-icon{color:var(--ink-4);flex-shrink:0;}
+.env-item-label{font-size:11px;font-weight:500;color:var(--ink-4);}
+.env-item-value{font-size:11.5px;font-weight:500;color:var(--ink-2);}
+.env-sep{color:var(--border-md);font-size:14px;user-select:none;}
+.env-name-badge{display:inline-flex;align-items:center;background:var(--blue-lt);color:var(--blue);border:1px solid var(--blue-bd);border-radius:5px;padding:1px 8px;font-size:11px;font-weight:600;}
+.env-url{font-family:var(--font-mono);font-size:11px;color:var(--ink-3);}
+
+/* ── Defect Categories Panel ──────────────────────────────────────────────── */
+.defect-panel{background:var(--white);border:1px solid var(--border);border-left:3px solid var(--fail);border-radius:var(--r-lg);padding:14px 18px;margin-bottom:16px;box-shadow:var(--shadow);}
+.defect-panel-header{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--ink);margin-bottom:12px;}
+.defect-panel-header svg{color:var(--fail);}
+.defect-total-badge{margin-left:auto;font-size:11px;font-weight:600;background:var(--fail-lt);color:var(--fail);border:1px solid var(--fail-bd);border-radius:999px;padding:1px 9px;}
+.defect-cards{display:flex;flex-direction:column;gap:6px;}
+.defect-card{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:var(--r);background:var(--page-bg);border:1px solid var(--border);}
+.defect-icon{flex-shrink:0;color:var(--fail);width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:var(--fail-lt);border-radius:5px;border:1px solid var(--fail-bd);}
+.defect-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.defect-name{font-size:12px;font-weight:500;color:var(--ink);}
+.defect-bar-wrap{height:4px;background:var(--border);border-radius:999px;overflow:hidden;}
+.defect-bar{height:4px;background:var(--fail);border-radius:999px;}
+.defect-count{font-size:13px;font-weight:700;color:var(--fail);min-width:20px;text-align:right;}
 
 /* Animations */
 @keyframes fadeDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
@@ -1020,6 +1438,31 @@ tbody tr{animation:fadeUp .3s ease both;}
 tbody tr:nth-child(1){animation-delay:.30s}tbody tr:nth-child(2){animation-delay:.36s}
 tbody tr:nth-child(3){animation-delay:.42s}tbody tr:nth-child(4){animation-delay:.48s}
 tbody tr:nth-child(n+5){animation-delay:.52s}
+
+/* ── Expandable failure rows ──────────────────────────────────────────────── */
+.row-expandable{cursor:pointer;}
+.row-expandable:hover td{background:var(--fail-lt) !important;}
+.row-expanded td{background:var(--fail-lt) !important;border-bottom:none !important;}
+.expand-hint{display:block;font-size:10px;color:var(--ink-4);margin-top:3px;user-select:none;}
+.row-expanded .expand-hint{visibility:hidden;}
+.expand-row td{padding:0 !important;border-top:none !important;}
+.expand-td{padding:0 !important;}
+.expand-panel{background:var(--fail-lt);border-bottom:2px solid var(--fail-bd);padding:14px 20px 18px 28px;display:flex;flex-direction:column;gap:16px;}
+.expand-section{display:flex;flex-direction:column;gap:8px;}
+.expand-section-title{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--fail);text-transform:uppercase;letter-spacing:.06em;}
+.expand-steps{display:flex;flex-direction:column;gap:6px;}
+.expand-step{display:flex;align-items:flex-start;gap:8px;background:var(--white);border:1px solid var(--fail-bd);border-radius:var(--r);padding:8px 12px;}
+.expand-step-icon{color:var(--fail);font-size:11px;font-weight:700;flex-shrink:0;margin-top:1px;}
+.expand-step-body{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.expand-step-title{font-size:12px;font-weight:500;color:var(--ink);}
+.expand-step-error{font-family:var(--font-mono);font-size:11px;color:var(--fail);word-break:break-word;line-height:1.5;}
+.expand-step-loc{display:flex;align-items:center;gap:4px;margin-top:3px;}
+.expand-step-loc svg{color:var(--ink-4);flex-shrink:0;}
+.expand-step-loc-path{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);}
+.expand-step-loc-line{font-family:var(--font-mono);font-size:10.5px;color:var(--blue);font-weight:600;}
+.expand-screenshot-wrap{display:flex;}
+.expand-screenshot{max-width:720px;width:100%;border:1px solid var(--fail-bd);border-radius:var(--r);box-shadow:0 2px 8px rgba(0,0,0,.10);cursor:zoom-in;transition:max-width .2s ease;}
+.expand-screenshot.zoomed{max-width:100%;cursor:zoom-out;}
 </style>`;
     }
 }

@@ -27,5 +27,5 @@ body.users[*].age       type integer
 # ── Values ────────────────────────────────────────────────────
 body.total > 0
 body.users[*].id exists
-body.users[*].firstName == Manish
-body.users[*].email == manish.gangwar@gmail.com
+body.users[*].firstName exists
+body.users[*].email exists

@@ -40,16 +40,19 @@ const BROWSER_CATALOGUE = [
     {
         name: 'chromium',
         testMatch: '**/tests/system-testing/**/*.test.ts',
+        outputDir: 'test-results/ui',
         use: { ...devices['Desktop Chrome'] },
     },
     {
         name: 'firefox',
         testMatch: '**/tests/system-testing/**/*.test.ts',
+        outputDir: 'test-results/ui',
         use: { ...devices['Desktop Firefox'] },
     },
     {
         name: 'webkit',
         testMatch: '**/tests/system-testing/**/*.test.ts',
+        outputDir: 'test-results/ui',
         use: { ...devices['Desktop Safari'] },
     },
 

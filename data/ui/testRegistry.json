@@ -73,7 +73,7 @@
     "execution": {
       "enabled": true,
       "environment": "QA",
-      "browser": "chromium"
+      "browser": "all"
     },
     "data": {
       "Login": {
@@ -84,7 +84,7 @@
         "TestCaseID": "CartCheck-TC02",
         "AddProduct1": "Sauce Labs Backpack",
         "AddProduct2": "Sauce Labs Bike Light",
-        "ItemsInCart": 2
+        "ItemsInCart": 3
       },
       "Cart": {
         "TestCaseID": "CartCheck-TC02",
@@ -118,7 +118,7 @@
       "ProductPage": {
         "TestCaseID": "CartCheck-TC03",
         "AddProduct1": "Test.allTheThings() T-Shirt (Red)",
-        "ItemsInCart": 1
+        "ItemsInCart": 2
       },
       "Cart": {
         "TestCaseID": "CartCheck-TC03",

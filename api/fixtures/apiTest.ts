@@ -65,7 +65,7 @@ const ASSERTION_RESULTS = path.join(TEST_RESULTS_API, 'assertion-results');
 const RUN_TIMESTAMP = (() => {
     const n = new Date();
     const p = (v: number) => String(v).padStart(2, '0');
-    return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}-${p(n.getHours())}-${p(n.getMinutes())}`;
+    return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}-${p(n.getHours())}-${p(n.getMinutes())}-${p(n.getSeconds())}`;
 })();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ export const test = base.extend<ApiFixtures>({
         try {
             for (const root of [RESPONSE_LOGS, REQUEST_LOGS, ASSERTION_RESULTS]) {
                 const allRuns = fs.readdirSync(root)
-                    .filter(d => /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}$/.test(d))
+                    .filter(d => /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$/.test(d))
                     .sort();
                 if (allRuns.length > 5) {
                     for (const old of allRuns.slice(0, allRuns.length - 5)) {
